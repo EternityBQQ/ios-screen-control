@@ -1,15 +1,21 @@
-version: "3.8"
-
 services:
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./www:/usr/share/caddy/html:ro
+      - caddy_data:/data
+    restart: unless-stopped
+
   media-server:
     image: tiangolo/nginx-rtmp:latest
     ports:
-      - "1935:1935"       # RTMP 推流
-      - "8082:80"          # HTTP (HLS + 观看页面)
-      - "8444:443"         # HTTPS (OTA 安装)
+      - "1935:1935"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./certs:/etc/nginx/certs:ro
       - ./www:/usr/share/nginx/html:ro
       - hls_data:/tmp/hls
     restart: unless-stopped
@@ -25,3 +31,4 @@ services:
 
 volumes:
   hls_data:
+  caddy_data:

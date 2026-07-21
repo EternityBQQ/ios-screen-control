@@ -1,0 +1,3 @@
+www.reelmagic.cloud {
+    reverse_proxy media-server:80
+}
