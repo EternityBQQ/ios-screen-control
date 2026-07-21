@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      签名方式:
+        development  → 免费 Apple ID / 开发调试 (7天有效期)
+        ad-hoc       → 个人开发者 $99/年 (需登记设备 UDID, 1年有效期)
+        enterprise   → 企业开发者 $299/年 (不限设备, 1年有效期)
+    -->
+    <key>method</key>
+    <string>ad-hoc</string>
+
+    <!--
+      替换为你的 Apple Developer Team ID
+      查看地址: https://developer.apple.com/account → Membership
+    -->
+    <key>teamID</key>
+    <string>YOUR_TEAM_ID</string>
+
+    <key>compileBitcode</key>
+    <false/>
+
+    <key>stripSwiftSymbols</key>
+    <true/>
+
+    <key>signingStyle</key>
+    <string>automatic</string>
+</dict>
+</plist>

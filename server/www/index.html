@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>ScreenCapture — 实时观看</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background: #0d0d0d;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ── Player ── */
+        video {
+            width: 100vw; height: 100vh;
+            object-fit: contain;
+            background: #000;
+        }
+
+        /* ── Status Overlay ── */
+        .overlay {
+            position: fixed; top: max(20px, env(safe-area-inset-top));
+            left: 20px; z-index: 10;
+            display: flex; align-items: center; gap: 8px;
+            background: rgba(0,0,0,.55);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-radius: 20px;
+            padding: 10px 16px;
+            font-size: 13px;
+            font-weight: 500;
+            letter-spacing: .02em;
+        }
+        .dot { width: 7px; height: 7px; border-radius: 50%; }
+        .dot.live { background: #34C759; box-shadow: 0 0 8px rgba(52,199,89,.4); animation: pulse 2s ease-in-out infinite; }
+        @keyframes pulse { 0%,100%{opacity:1; transform:scale(1)} 50%{opacity:.5; transform:scale(1.2)} }
+
+        /* ── Empty State ── */
+        .empty {
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            height: 100vh;
+            padding: 40px 24px;
+            background:
+                radial-gradient(ellipse at 50% 30%, rgba(0,122,255,.06) 0%, transparent 70%),
+                #0d0d0d;
+        }
+        .empty-icon {
+            width: 88px; height: 88px;
+            border-radius: 24px;
+            background: linear-gradient(145deg, rgba(0,122,255,.15), rgba(88,86,214,.15));
+            display: flex; align-items: center; justify-content: center;
+            margin-bottom: 24px;
+        }
+        .empty-icon svg { width: 44px; height: 44px; opacity: .6; }
+        .empty h2 { font-size: 22px; font-weight: 600; color: #ccc; margin-bottom: 4px; }
+        .empty .sub { font-size: 14px; color: #666; margin-bottom: 32px; }
+
+        /* ── QR Card ── */
+        .qr-card {
+            background: #fff;
+            border-radius: 20px;
+            padding: 24px 24px 14px;
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(0,0,0,.4);
+            max-width: 260px;
+            width: 100%;
+        }
+        .qr-card .label {
+            font-size: 12px; font-weight: 600;
+            color: #8e8e93; text-transform: uppercase;
+            letter-spacing: .06em;
+            margin-bottom: 16px;
+        }
+        .qr-card .qr-wrap {
+            display: inline-block;
+            padding: 12px;
+            border: 1.5px dashed #e5e5ea;
+            border-radius: 14px;
+        }
+        .qr-card .hint {
+            margin-top: 14px;
+            font-size: 12px; color: #8e8e93;
+            line-height: 1.5;
+        }
+        .qr-card .hint span {
+            display: inline-flex; align-items: center; gap: 3px;
+            color: #007AFF; font-weight: 500;
+        }
+
+        /* ── Stream Picker ── */
+        .picker {
+            position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
+            z-index: 10;
+            display: flex; gap: 6px;
+            background: rgba(28,28,30,.8);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-radius: 16px;
+            padding: 4px;
+        }
+        .picker button {
+            background: transparent; border: none; color: #fff;
+            font-family: inherit; font-size: 12px; font-weight: 500;
+            padding: 8px 16px; border-radius: 13px;
+            cursor: pointer; transition: all .2s;
+            white-space: nowrap;
+        }
+        .picker button:hover { background: rgba(255,255,255,.1); }
+        .picker button.active { background: rgba(255,255,255,.18); font-weight: 600; }
+    </style>
+</head>
+<body>
+
+    <!-- Status -->
+    <div class="overlay" id="statusBar" style="display:none;">
+        <div class="dot live"></div>
+        <span id="statusText">LIVE</span>
+    </div>
+
+    <!-- Empty -->
+    <div class="empty" id="emptyState">
+        <div class="empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round">
+                <rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12" y2="18.01"/>
+            </svg>
+        </div>
+        <h2>等待设备推流</h2>
+        <p class="sub">在 iOS 控制中心启动录屏</p>
+
+        <div class="qr-card">
+            <div class="label">📱 扫码在另一台设备观看</div>
+            <div class="qr-wrap"><div id="qrcode"></div></div>
+            <p class="hint">打开 <span>ScreenViewer</span> App 扫描二维码<br>无需输入地址，自动连接</p>
+        </div>
+    </div>
+
+    <!-- Player -->
+    <video id="player" autoplay muted playsinline controls style="display:none;"></video>
+
+    <!-- Stream picker (shows when multiple streams) -->
+    <div class="picker" id="streamPicker" style="display:none;"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <script>
+        // ── QR Code ──
+        const serverUrl = `${location.protocol}//${location.host}`;
+        new QRCode(document.getElementById("qrcode"), {
+            text: serverUrl,
+            width: 140, height: 140,
+            colorDark: "#1c1c1e",
+            colorLight: "#ffffff",
+            correctLevel: QRCode.CorrectLevel.L,
+        });
+
+        // ── State ──
+        const params = new URLSearchParams(location.search);
+        let streamKey = params.get("key") || "iphone";
+        const video = document.getElementById("player");
+        const empty = document.getElementById("empty");
+        const statusBar = document.getElementById("statusBar");
+        const picker = document.getElementById("streamPicker");
+        let allStreams = {};
+        let hls = null;
+
+        function startPlayer(key) {
+            streamKey = key;
+
+            if (hls) { hls.destroy(); hls = null; }
+
+            if (!Hls.isSupported()) {
+                video.src = `/hls/${streamKey}.m3u8`;
+                video.style.display = "block";
+                empty.style.display = "none";
+                statusBar.style.display = "flex";
+                return;
+            }
+
+            hls = new Hls({
+                liveSyncDurationCount: 2,
+                maxBufferLength: 4,
+                enableWorker: true,
+            });
+
+            hls.loadSource(`/hls/${streamKey}.m3u8`);
+            hls.attachMedia(video);
+
+            hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                video.play();
+                video.style.display = "block";
+                empty.style.display = "none";
+                statusBar.style.display = "flex";
+            });
+
+            hls.on(Hls.Events.ERROR, (_, data) => {
+                if (data.fatal) {
+                    hls.destroy();
+                    hls = null;
+                    video.style.display = "none";
+                    empty.style.display = "flex";
+                    empty.querySelector("h2").textContent = "⚠️ 连接断开";
+                    statusBar.style.display = "none";
+                    picker.style.display = "none";
+                }
+            });
+        }
+
+        // ── Poll stream list ──
+        async function checkStreams() {
+            try {
+                const res = await fetch("/api/streams");
+                allStreams = await res.json();
+                const liveKeys = Object.keys(allStreams).filter(k => allStreams[k].status === "live");
+
+                if (liveKeys.length === 0) {
+                    // No streams — show empty with QR
+                    if (video.style.display !== "none") {
+                        if (hls) { hls.destroy(); hls = null; }
+                        video.style.display = "none";
+                        empty.style.display = "flex";
+                        statusBar.style.display = "none";
+                        picker.style.display = "none";
+                    }
+                } else {
+                    // Has streams — show picker if multiple
+                    if (liveKeys.length > 1) {
+                        picker.innerHTML = liveKeys.map(k => {
+                            const active = k === streamKey ? ' class="active"' : '';
+                            return `<button${active} onclick="startPlayer('${k}')">📱 ${k}</button>`;
+                        }).join("");
+                        picker.style.display = "flex";
+                    } else {
+                        picker.style.display = "none";
+                    }
+
+                    // Auto-play if not already
+                    if (!video.style.display || video.style.display === "none") {
+                        startPlayer(liveKeys[0]);
+                    }
+                }
+            } catch {
+                // Silent retry
+            }
+            setTimeout(checkStreams, 3000);
+        }
+
+        checkStreams();
+    </script>
+</body>
+</html>

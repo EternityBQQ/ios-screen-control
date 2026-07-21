@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>安装 ScreenCapture</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #f2f2f7;
+            display: flex; justify-content: center; align-items: center;
+            min-height: 100vh; padding: 20px;
+        }
+        .card {
+            background: #fff;
+            border-radius: 24px;
+            padding: 48px 36px 36px;
+            text-align: center;
+            box-shadow: 0 4px 24px rgba(0,0,0,.06);
+            max-width: 360px; width: 100%;
+        }
+        .icon {
+            width: 84px; height: 84px; border-radius: 20px;
+            background: linear-gradient(135deg, #007AFF, #5856D6);
+            margin: 0 auto 24px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 40px; color: #fff;
+        }
+        h1 { font-size: 24px; font-weight: 700; margin-bottom: 8px; color: #1c1c1e; }
+        .ver { font-size: 14px; color: #8e8e93; margin-bottom: 8px; }
+        .desc { font-size: 14px; color: #3c3c43; margin-bottom: 32px; line-height: 1.6; }
+        .install-btn {
+            display: block; width: 100%;
+            background: #007AFF; color: #fff;
+            border: none; border-radius: 14px;
+            padding: 16px 0; font-size: 18px;
+            font-weight: 600; text-decoration: none;
+            margin-bottom: 16px;
+            cursor: pointer;
+        }
+        .install-btn:active { opacity: 0.8; }
+        .hint { font-size: 12px; color: #8e8e93; line-height: 1.6; }
+        .hint a { color: #007AFF; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="icon">📱</div>
+        <h1>ScreenCapture</h1>
+        <p class="ver">Version 1.0</p>
+        <p class="desc">
+            iOS 屏幕实时采集推流<br>
+            从控制中心启动录屏，画面实时推送
+        </p>
+        <a class="install-btn"
+           id="installLink"
+           href="itms-services://?action=download-manifest&url=https://YOUR_SERVER:8443/ota/manifest.plist">
+            安装 App
+        </a>
+        <p class="hint">
+            安装后请到<br>
+            <strong>设置 → 通用 → VPN与设备管理</strong><br>
+            信任企业证书后即可使用
+        </p>
+    </div>
+</body>
+</html>

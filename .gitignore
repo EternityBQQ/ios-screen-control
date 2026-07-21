@@ -1,0 +1,27 @@
+# Xcode
+*.xcworkspace
+*.xcuserdata
+*.xcarchive
+*.ipa
+DerivedData/
+build/
+
+# Certs & keys
+server/certs/*
+!server/certs/.gitkeep
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+Thumbs.db
+
+# Docker
+server/hls_data/
+
+# Claude
+.claude/

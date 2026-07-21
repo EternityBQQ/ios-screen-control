@@ -1,0 +1,22 @@
+name: ScreenViewer
+options:
+  bundleIdPrefix: com.screencapture
+  deploymentTarget:
+    iOS: "15.0"
+  xcodeVersion: "15.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+
+targets:
+  ScreenViewer:
+    type: application
+    platform: iOS
+    sources:
+      - path: .
+    settings:
+      base:
+        INFOPLIST_FILE: ScreenViewer/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.screencapture.viewer
+    dependencies: []

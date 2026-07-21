@@ -1,0 +1,27 @@
+version: "3.8"
+
+services:
+  media-server:
+    image: tiangolo/nginx-rtmp:latest
+    ports:
+      - "1935:1935"       # RTMP 推流
+      - "8082:80"          # HTTP (HLS + 观看页面)
+      - "8444:443"         # HTTPS (OTA 安装)
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+      - ./www:/usr/share/nginx/html:ro
+      - hls_data:/tmp/hls
+    restart: unless-stopped
+
+  api:
+    image: python:3.11-alpine
+    ports:
+      - "8081:8081"
+    command: python /app/server.py
+    volumes:
+      - ./server.py:/app/server.py:ro
+    restart: unless-stopped
+
+volumes:
+  hls_data:
