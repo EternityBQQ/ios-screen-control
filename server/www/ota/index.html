@@ -7,41 +7,107 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
             background: #f2f2f7;
             display: flex; justify-content: center; align-items: center;
             min-height: 100vh; padding: 20px;
+            -webkit-font-smoothing: antialiased;
         }
+
         .card {
             background: #fff;
             border-radius: 24px;
             padding: 48px 36px 36px;
             text-align: center;
-            box-shadow: 0 4px 24px rgba(0,0,0,.06);
-            max-width: 360px; width: 100%;
+            box-shadow: 0 4px 24px rgba(0,0,0,.06), 0 1px 3px rgba(0,0,0,.04);
+            max-width: 380px; width: 100%;
+            transition: all .3s;
         }
+
         .icon {
-            width: 84px; height: 84px; border-radius: 20px;
-            background: linear-gradient(135deg, #007AFF, #5856D6);
-            margin: 0 auto 24px;
+            width: 84px; height: 84px; border-radius: 22px;
+            background: linear-gradient(145deg, #007AFF, #5856D6);
+            margin: 0 auto 28px;
             display: flex; align-items: center; justify-content: center;
-            font-size: 40px; color: #fff;
+            font-size: 38px; color: #fff;
+            box-shadow: 0 8px 24px rgba(0,122,255,.25);
         }
-        h1 { font-size: 24px; font-weight: 700; margin-bottom: 8px; color: #1c1c1e; }
-        .ver { font-size: 14px; color: #8e8e93; margin-bottom: 8px; }
+
+        h1 { font-size: 24px; font-weight: 700; margin-bottom: 4px; color: #1c1c1e; letter-spacing: -.3px; }
+        .ver { font-size: 13px; color: #8e8e93; margin-bottom: 12px; font-weight: 500; }
         .desc { font-size: 14px; color: #3c3c43; margin-bottom: 32px; line-height: 1.6; }
+
+        /* ── Install Button ── */
         .install-btn {
             display: block; width: 100%;
             background: #007AFF; color: #fff;
             border: none; border-radius: 14px;
             padding: 16px 0; font-size: 18px;
             font-weight: 600; text-decoration: none;
-            margin-bottom: 16px;
+            margin-bottom: 14px;
             cursor: pointer;
+            transition: all .2s;
+            box-shadow: 0 4px 14px rgba(0,122,255,.3);
         }
-        .install-btn:active { opacity: 0.8; }
-        .hint { font-size: 12px; color: #8e8e93; line-height: 1.6; }
-        .hint a { color: #007AFF; text-decoration: none; }
+        .install-btn:active { opacity: 0.85; transform: scale(.98); }
+        .install-btn.disabled {
+            background: #c7c7cc; color: #fff;
+            pointer-events: none;
+            box-shadow: none;
+        }
+
+        .hint { font-size: 12px; color: #8e8e93; line-height: 1.7; }
+        .hint strong { color: #3c3c43; }
+
+        /* ── Build Guide ── */
+        .build-guide {
+            display: none;
+            margin-top: 24px; padding-top: 24px;
+            border-top: 1px solid #e5e5ea;
+            text-align: left;
+        }
+        .build-guide.show { display: block; }
+
+        .build-guide h3 {
+            font-size: 15px; color: #1c1c1e;
+            margin-bottom: 16px; text-align: center;
+        }
+        .build-guide .step {
+            display: flex; gap: 12px; align-items: flex-start;
+            margin-bottom: 14px;
+        }
+        .build-guide .step-num {
+            width: 24px; height: 24px; border-radius: 12px;
+            background: #007AFF; color: #fff;
+            font-size: 13px; font-weight: 700;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0; margin-top: 1px;
+        }
+        .build-guide .step-text {
+            font-size: 13px; color: #3c3c43; line-height: 1.5;
+        }
+        .build-guide code {
+            background: #f2f2f7; padding: 2px 6px;
+            border-radius: 4px; font-size: 12px;
+            color: #007AFF;
+        }
+
+        /* ── Status banner ── */
+        .banner {
+            padding: 10px 16px; border-radius: 10px;
+            font-size: 13px; font-weight: 500; margin-bottom: 20px;
+        }
+        .banner.ok { background: #e8f8ed; color: #1d7a3e; }
+        .banner.wait { background: #fff3e0; color: #b05a00; }
+
+        /* ── Spinner ── */
+        .spinner {
+            display: inline-block; width: 16px; height: 16px;
+            border: 2px solid #c7c7cc; border-top-color: #007AFF;
+            border-radius: 50%; animation: spin .6s linear infinite;
+            vertical-align: middle; margin-right: 6px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
@@ -53,16 +119,103 @@
             iOS 屏幕实时采集推流<br>
             从控制中心启动录屏，画面实时推送
         </p>
-        <a class="install-btn"
-           id="installLink"
-           href="itms-services://?action=download-manifest&url=https://YOUR_SERVER:8443/ota/manifest.plist">
-            安装 App
-        </a>
-        <p class="hint">
-            安装后请到<br>
-            <strong>设置 → 通用 → VPN与设备管理</strong><br>
-            信任企业证书后即可使用
-        </p>
+
+        <!-- State: checking -->
+        <div id="state-checking">
+            <span class="spinner"></span>
+            <span style="color:#8e8e93;font-size:14px;">检测安装包...</span>
+        </div>
+
+        <!-- State: IPA available -->
+        <div id="state-ready" style="display:none;">
+            <div class="banner ok">✅ 安装包就绪，点击下方安装</div>
+
+            <a class="install-btn" id="installLink"
+               href="itms-services://?action=download-manifest&url=MANIFEST_URL">
+                安装 ScreenCapture
+            </a>
+            <p class="hint">
+                安装后请到<br>
+                <strong>设置 → 通用 → VPN与设备管理</strong><br>
+                信任证书后即可使用
+            </p>
+        </div>
+
+        <!-- State: IPA not found -->
+        <div id="state-missing" style="display:none;">
+            <div class="banner wait">⚠️ 安装包尚未部署</div>
+            <p style="font-size:13px;color:#666;margin-bottom:16px;">
+                你需要在 Mac 上编译打包，然后把 IPA 放到服务器上
+            </p>
+
+            <div class="build-guide show">
+                <h3>📋 Mac 上操作步骤</h3>
+                <div class="step">
+                    <span class="step-num">1</span>
+                    <span class="step-text">
+                        克隆仓库:<br>
+                        <code>git clone git@gitee.com:zhangzheng521/ios-screen-control.git</code>
+                    </span>
+                </div>
+                <div class="step">
+                    <span class="step-num">2</span>
+                    <span class="step-text">
+                        安装 XcodeGen:<br>
+                        <code>brew install xcodegen</code>
+                    </span>
+                </div>
+                <div class="step">
+                    <span class="step-num">3</span>
+                    <span class="step-text">
+                        用<strong>免费 Apple ID</strong> 登录 Xcode<br>
+                        (设置 → Accounts → 点 + 登录)
+                    </span>
+                </div>
+                <div class="step">
+                    <span class="step-num">4</span>
+                    <span class="step-text">
+                        一键打包:<br>
+                        <code>bash build_ios.sh</code>
+                    </span>
+                </div>
+                <div class="step">
+                    <span class="step-num">5</span>
+                    <span class="step-text">
+                        上传到服务器:<br>
+                        <code>scp ScreenCapture/build/ipa/ScreenCapture.ipa user@server:~/ios-screen-control/server/www/ota/</code>
+                    </span>
+                </div>
+            </div>
+        </div>
     </div>
+
+    <script>
+        // Auto-detect if IPA is deployed by checking manifest.plist
+        (async function() {
+            // Build the manifest URL from current location
+            const base = location.origin;
+            const manifestUrl = `${base}/ota/manifest.plist`;
+
+            try {
+                const res = await fetch(manifestUrl, { method: 'HEAD' });
+                if (res.ok) {
+                    // IPA is deployed → show install
+                    document.getElementById('state-checking').style.display = 'none';
+                    document.getElementById('state-ready').style.display = 'block';
+                    document.getElementById('installLink').href =
+                        `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestUrl)}`;
+                } else {
+                    showMissing();
+                }
+            } catch {
+                showMissing();
+            }
+
+            function showMissing() {
+                document.getElementById('state-checking').style.display = 'none';
+                document.getElementById('state-missing').style.display = 'block';
+            }
+        })();
+    </script>
 </body>
 </html>

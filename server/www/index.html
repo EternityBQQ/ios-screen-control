@@ -146,6 +146,16 @@
     <!-- Stream picker (shows when multiple streams) -->
     <div class="picker" id="streamPicker" style="display:none;"></div>
 
+    <!-- Download link -->
+    <a href="/ota/" id="downloadBadge"
+       style="position:fixed;top:max(20px,env(safe-area-inset-top));right:20px;z-index:10;
+              background:rgba(0,122,255,.9);color:#fff;border-radius:20px;padding:10px 18px;
+              font-size:13px;font-weight:600;text-decoration:none;
+              backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+              display:flex;align-items:center;gap:6px;">
+        <span style="font-size:14px;">⬇</span> 安装 App
+    </a>
+
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     <script>

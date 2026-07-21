@@ -165,6 +165,17 @@ detect_ip() {
 }
 LOCAL_IP=$(detect_ip)
 
+# ─── 替换 OTA 文件中的 YOUR_SERVER 占位符 ───
+OTA_DIR="$SERVER_DIR/www/ota"
+if [ -d "$OTA_DIR" ]; then
+    for f in "$OTA_DIR/index.html" "$OTA_DIR/manifest.plist"; do
+        if [ -f "$f" ]; then
+            sed -i "s/YOUR_SERVER/${LOCAL_IP}:${HTTPS_PORT}/g" "$f"
+        fi
+    done
+    success "OTA 文件中的服务器地址已替换为 ${LOCAL_IP}:${HTTPS_PORT}"
+fi
+
 echo ""
 echo -e "${BOLD}━━━━━━━━━━━ 访问地址 ━━━━━━━━━━━━━━${NC}"
 echo ""
@@ -188,11 +199,36 @@ echo ""
 # ─── OTA 安装提示 ─────────────────────────────
 echo -e "${BOLD}━━━━━━━━━━━ OTA 安装 ━━━━━━━━━━━━━━━━${NC}"
 echo ""
-echo -e "  1. 将 ScreenCapture.ipa 放入 ${CYAN}server/www/ota/${NC}"
-echo -e "  2. 在 ${CYAN}server/www/ota/index.html${NC} 和 ${CYAN}manifest.plist${NC}"
-echo -e "     中把 ${YELLOW}YOUR_SERVER${NC} 替换为 ${GREEN}${LOCAL_IP}${NC}"
-echo -e "  3. iPhone Safari 打开:"
-echo -e "     ${GREEN}https://${LOCAL_IP}:${HTTPS_PORT}/ota/${NC}"
+
+IPA_PATH="$OTA_DIR/ScreenCapture.ipa"
+if [ -f "$IPA_PATH" ]; then
+    echo -e "  ${GREEN}✅ IPA 已部署${NC}"
+    echo -e "  iPhone Safari 打开即装:"
+    echo -e "  ${GREEN}https://${LOCAL_IP}:${HTTPS_PORT}/ota/${NC}"
+else
+    echo -e "  ${YELLOW}⚠️  IPA 尚未部署${NC}"
+    echo ""
+    echo -e "  在 Mac 上运行以下命令打包并上传:"
+    echo ""
+    echo -e "  ${CYAN}# 1. 克隆仓库 (如果没有)${NC}"
+    echo -e "  git clone git@gitee.com:zhangzheng521/ios-screen-control.git"
+    echo -e "  cd ios-screen-control"
+    echo ""
+    echo -e "  ${CYAN}# 2. 安装 XcodeGen${NC}"
+    echo -e "  brew install xcodegen"
+    echo ""
+    echo -e "  ${CYAN}# 3. 用免费 Apple ID 登录 Xcode${NC}"
+    echo -e "  Xcode → Settings → Accounts → 登录"
+    echo ""
+    echo -e "  ${CYAN}# 4. 一键打包${NC}"
+    echo -e "  bash build_ios.sh"
+    echo ""
+    echo -e "  ${CYAN}# 5. 上传 IPA 到服务器${NC}"
+    echo -e "  ${BOLD}scp ScreenCapture/build/ipa/ScreenCapture.ipa $(whoami)@${LOCAL_IP}:$(pwd)/server/www/ota/${NC}"
+    echo ""
+    echo -e "  上传后刷新 ${GREEN}https://${LOCAL_IP}:${HTTPS_PORT}/ota/${NC} 即可安装"
+fi
+
 echo ""
 
 echo -e "${GREEN}${BOLD}✅ 部署完成!${NC}"
