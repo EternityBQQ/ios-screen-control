@@ -1,0 +1,83 @@
+name: VNC 远程桌面
+
+# 在 GitHub Actions macOS runner 上开启 VNC 远程桌面
+# 用 iPhone 的 VNC Viewer 连上去操作 Xcode 登录 Apple ID
+
+on:
+  workflow_dispatch:
+
+jobs:
+  vnc:
+    name: 🖥️ macOS 远程桌面
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 开启 macOS 屏幕共享 (VNC)
+        run: |
+          VNC_PASS="iosdev123"
+
+          echo "  正在开启屏幕共享..."
+
+          # 开启 VNC 远程管理
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -activate -configure -access -on \
+            -clientopts -setvnclegacy -vnclegacy yes \
+            -clientopts -setvncpw -vncpw "$VNC_PASS" \
+            -restart -agent 2>&1
+
+          echo "✅ VNC 已开启 (密码: $VNC_PASS)"
+
+          # 确保端口在监听
+          sleep 3
+          lsof -i :5900 | head -5
+          echo "VNC_PASS=$VNC_PASS" >> "$GITHUB_ENV"
+
+      - name: 安装 bore 隧道工具
+        run: |
+          curl -fsSL https://github.com/ekzhang/bore/releases/download/v0.5.2/bore-v0.5.2-x86_64-apple-darwin.tar.gz -o /tmp/bore.tar.gz
+          tar xzf /tmp/bore.tar.gz -C /usr/local/bin/
+          chmod +x /usr/local/bin/bore
+          echo "✅ bore 已安装"
+
+      - name: 启动隧道 + 显示连接信息
+        timeout-minutes: 55
+        run: |
+          echo ""
+          echo "╔══════════════════════════════════════════════╗"
+          echo "║     🖥️  macOS 远程桌面已就绪                   ║"
+          echo "╠══════════════════════════════════════════════╣"
+          echo "║                                              ║"
+          echo "║  📲 iPhone 操作步骤:                          ║"
+          echo "║  1. App Store 下载 'VNC Viewer'              ║"
+          echo "║  2. 打开 App，点 + 添加连接                   ║"
+          echo "║  3. 地址: 等下会显示在下方                     ║"
+          echo "║  4. 密码: iosdev123                          ║"
+          echo "║                                              ║"
+          echo "║  🖥️  连上后操作:                              ║"
+          echo "║  1. Dock 栏点 Xcode 图标                     ║"
+          echo "║  2. 菜单栏 Xcode → Settings → Accounts       ║"
+          echo "║  3. 左下角 + → 登录你的 Apple ID              ║"
+          echo "║  4. 等 30 秒出现 Personal Team              ║"
+          echo "║  5. 完成！Team ID 会在 Accounts 页面显示      ║"
+          echo "║                                              ║"
+          echo "╚══════════════════════════════════════════════╝"
+          echo ""
+
+          # 启动 bore 隧道 (TCP)
+          echo "  正在启动隧道..."
+          bore local 5900 --to bore.pub 2>&1 | while IFS= read -r line; do
+            echo "$line"
+            if echo "$line" | grep -q "listening at"; then
+              ADDR=$(echo "$line" | grep -oE 'bore\.pub:[0-9]+')
+              if [ -n "$ADDR" ]; then
+                echo ""
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                echo "  📲 VNC 连接地址: $ADDR"
+                echo "  🔑 密码: iosdev123"
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                echo ""
+              fi
+            fi
+          done
