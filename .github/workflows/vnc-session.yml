@@ -49,16 +49,22 @@ jobs:
           caffeinate -d -i -m -s &
           echo "✅ 显示器保持唤醒"
 
-          # 重启 WindowServer 相关服务
+          # 重启屏幕共享
           sudo launchctl start com.apple.screensharing 2>/dev/null || true
 
-          # 打开 Xcode
-          open -a Xcode
+          # 找到并打开 Xcode
+          XCODE=$(ls -d /Applications/Xcode*.app 2>/dev/null | head -1)
+          if [ -n "$XCODE" ]; then
+            open "$XCODE"
+            echo "✅ 已打开 $XCODE"
+          else
+            echo "⚠️ 未找到 Xcode"
+          fi
           sleep 5
 
           # 截个图确认桌面正常
           screencapture /tmp/desktop.png
-          echo "✅ 桌面截图已保存 (验证用)"
+          echo "✅ 桌面截图已保存"
 
       - name: 安装 bore 隧道工具
         run: |
