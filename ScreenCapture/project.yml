@@ -17,9 +17,9 @@ targets:
       - path: .
     settings:
       base:
-        INFOPLIST_FILE: ScreenCapture/Info.plist
+        INFOPLIST_FILE: Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: com.screencapture.app
-        CODE_SIGN_ENTITLEMENTS: ScreenCapture/ScreenCapture.entitlements
+        CODE_SIGN_ENTITLEMENTS: ScreenCapture.entitlements
 
   ScreenCaptureUpload:
     type: app-extension
@@ -28,6 +28,6 @@ targets:
       - path: ../ScreenCaptureUpload
     settings:
       base:
-        INFOPLIST_FILE: ScreenCaptureUpload/Info.plist
+        INFOPLIST_FILE: ../ScreenCaptureUpload/Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: com.screencapture.app.upload
-        CODE_SIGN_ENTITLEMENTS: ScreenCaptureUpload/ScreenCaptureUpload.entitlements
+        CODE_SIGN_ENTITLEMENTS: ../ScreenCaptureUpload/ScreenCaptureUpload.entitlements
