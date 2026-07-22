@@ -256,24 +256,51 @@ jobs:
           gem install fastlane -N --no-document 2>&1 | tail -5
           fastlane --version
 
-      - name: Setup fastlane Apple Auth
-        run: |
-          # 创建临时 Fastfile 用于 Apple ID 认证
-          mkdir -p ~/.fastlane
-          cat > ~/.fastlane/Fastfile << 'FASTFILE'
-          # 仅用于 CI 认证的 Fastfile
-          FASTFILE
-
-      - name: Register Device & Refresh Profiles
+      - name: Discover Team ID via fastlane
         env:
           FASTLANE_USER: ${{ secrets.APPLE_ID_EMAIL }}
           FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          FASTLANE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID || '' }}
         run: |
-          echo "  正在通过 fastlane 认证..."
-          # fastlane 会在后台处理 Apple ID 认证
-          # 如果认证成功，后续 xcodebuild 可以使用这个 session
-          echo "✅ fastlane 认证配置完成"
+          echo "  正在通过 Apple ID 发现关联的开发团队..."
+
+          # 写一个临时 Ruby 脚本用 spaceship 查询 Team
+          cat > /tmp/discover_team.rb << 'RUBYEOF'
+          require 'spaceship'
+
+          begin
+            Spaceship::Portal.login(
+              username: ENV["FASTLANE_USER"],
+              password: ENV["FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD"]
+            )
+            teams = Spaceship::Portal.client.teams
+            if teams.any?
+              puts teams.first["teamId"]
+            end
+          rescue => e
+            STDERR.puts "Portal: #{e.message}"
+            # 尝试 ConnectAPI
+            begin
+              Spaceship::ConnectAPI.login(
+                username: ENV["FASTLANE_USER"],
+                password: ENV["FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD"]
+              )
+              # ConnectAPI might not expose teams directly
+            rescue => e2
+              STDERR.puts "ConnectAPI: #{e2.message}"
+            end
+          end
+          RUBYEOF
+
+          TEAM_ID=$(ruby /tmp/discover_team.rb 2>/tmp/team_discover.log || echo "")
+
+          if [ -n "$TEAM_ID" ]; then
+            echo "TEAM_ID=$TEAM_ID" >> "$GITHUB_ENV"
+            echo "✅ 发现 Team ID: $TEAM_ID"
+          else
+            echo "⚠️  未能自动发现 Team ID (免费账号可能不支持 API 查询)"
+            echo "  日志:"
+            cat /tmp/team_discover.log
+          fi
 
       - name: Generate Xcode Project
         working-directory: ScreenCapture
