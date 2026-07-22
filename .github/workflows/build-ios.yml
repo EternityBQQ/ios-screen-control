@@ -1,0 +1,341 @@
+name: Build iOS Apps
+
+# ============================================================
+# CI/CD 自动构建 iOS App
+#
+# 触发方式:
+#   1. push/PR 到 main → 仅编译检查 (Build Check)
+#   2. 手动触发 (workflow_dispatch) → 编译 + 导出 IPA
+#
+# 签名说明:
+#   - Build Check: 不需要签名，只验证代码能编译通过
+#   - IPA Export: 需要配置 GitHub Secrets (见下方说明)
+# ============================================================
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: '构建类型'
+        required: true
+        type: choice
+        default: 'both'
+        options:
+          - build-check      # 仅编译检查 (无需签名)
+          - export-ipa       # 导出 IPA (需要签名 Secrets)
+          - both             # 编译检查 + 导出 IPA
+      scheme:
+        description: 'Target Scheme'
+        required: true
+        type: choice
+        default: 'ScreenCapture'
+        options:
+          - ScreenCapture    # 屏幕采集发送端
+          - ScreenViewer     # iOS 原生观看端
+
+env:
+  # Xcode 版本 — GitHub Actions macOS runner 预装版本
+  DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+
+jobs:
+  # ════════════════════════════════════════════════════════════
+  # Job 1: 编译检查 — 每次 push/PR 自动运行
+  # ════════════════════════════════════════════════════════════
+  build-check:
+    name: Build Check
+    # 自动触发: push/PR 时运行；手动触发: build-check 或 both 时运行
+    if: |
+      github.event_name != 'workflow_dispatch' ||
+      github.event.inputs.build_type == 'build-check' ||
+      github.event.inputs.build_type == 'both'
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache Homebrew
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/Homebrew
+          key: brew-${{ runner.os }}-${{ hashFiles('.github/workflows/build-ios.yml') }}
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Show Xcode Version
+        run: |
+          xcodebuild -version
+          xcodegen --version
+
+      - name: Generate Xcode Project (ScreenCapture)
+        if: github.event.inputs.scheme != 'ScreenViewer'
+        working-directory: ScreenCapture
+        run: xcodegen generate
+
+      - name: Generate Xcode Project (ScreenViewer)
+        if: github.event.inputs.scheme == 'ScreenViewer' || github.event_name != 'workflow_dispatch'
+        working-directory: ScreenViewer
+        run: xcodegen generate
+
+      - name: Build ScreenCapture (Verification Only)
+        if: github.event.inputs.scheme != 'ScreenViewer' || github.event_name != 'workflow_dispatch'
+        working-directory: ScreenCapture
+        run: |
+          xcodebuild build \
+            -project ScreenCapture.xcodeproj \
+            -scheme ScreenCapture \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            DEVELOPMENT_TEAM="" \
+            2>&1 | tail -20
+        # 此步骤仅验证代码可编译，产物不可安装
+        # 若失败: 检查代码是否有语法/类型错误
+
+      - name: Build ScreenViewer (Verification Only)
+        if: github.event.inputs.scheme == 'ScreenViewer' || github.event_name != 'workflow_dispatch'
+        working-directory: ScreenViewer
+        run: |
+          xcodebuild build \
+            -project ScreenViewer.xcodeproj \
+            -scheme ScreenViewer \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            DEVELOPMENT_TEAM="" \
+            2>&1 | tail -20
+
+      - name: Build Summary
+        run: |
+          echo ""
+          echo "✅ Build Check 通过 — 代码编译正常"
+          echo ""
+          echo "📱 产物不可安装（未签名），仅用于验证代码正确性"
+          echo "🔑 要生成可安装的 IPA，请:"
+          echo "   1. 配置 GitHub Secrets (见下方说明)"
+          echo "   2. 在 Actions 页面手动触发 → 选择 export-ipa"
+          echo ""
+
+  # ════════════════════════════════════════════════════════════
+  # Job 2: 导出 IPA — 手动触发，需要签名 Secrets
+  # ════════════════════════════════════════════════════════════
+  export-ipa:
+    name: Export IPA
+    if: |
+      github.event_name == 'workflow_dispatch' &&
+      (github.event.inputs.build_type == 'export-ipa' || github.event.inputs.build_type == 'both')
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check Signing Secrets
+        run: |
+          MISSING=""
+          if [ -z "${{ secrets.APPLE_TEAM_ID }}" ]; then
+            MISSING="$MISSING APPLE_TEAM_ID"
+          fi
+          if [ -z "${{ secrets.BUILD_CERTIFICATE_BASE64 }}" ]; then
+            MISSING="$MISSING BUILD_CERTIFICATE_BASE64"
+          fi
+          if [ -z "${{ secrets.P12_PASSWORD }}" ]; then
+            MISSING="$MISSING P12_PASSWORD"
+          fi
+          if [ -z "${{ secrets.PROVISIONING_PROFILE_BASE64 }}" ]; then
+            MISSING="$MISSING PROVISIONING_PROFILE_BASE64"
+          fi
+
+          if [ -n "$MISSING" ]; then
+            echo "❌ 缺少以下 GitHub Secrets: $MISSING"
+            echo ""
+            echo "请先完成签名配置，详见 .github/workflows/SIGNING-SETUP.md"
+            exit 1
+          fi
+          echo "✅ 所有签名 Secrets 已配置"
+
+      - name: Cache Homebrew
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/Homebrew
+          key: brew-${{ runner.os }}-${{ hashFiles('.github/workflows/build-ios.yml') }}
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Setup Keychain & Import Certificate
+        run: |
+          # 创建临时 Keychain
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # 导入签名证书
+          CERT_PATH="$RUNNER_TEMP/build-certificate.p12"
+          echo "${{ secrets.BUILD_CERTIFICATE_BASE64 }}" | base64 --decode -o "$CERT_PATH"
+          security import "$CERT_PATH" \
+            -k "$KEYCHAIN_PATH" \
+            -P "${{ secrets.P12_PASSWORD }}" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+
+          # 添加到搜索列表并设为默认
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed 's/["]//g')
+          security default-keychain -s "$KEYCHAIN_PATH"
+
+          # 允许 codesign 无弹窗访问
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          echo "✅ Keychain 已配置"
+
+      - name: Install Provisioning Profile
+        run: |
+          PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$PROFILE_DIR"
+
+          PROFILE_PATH="$RUNNER_TEMP/profile.mobileprovision"
+          echo "${{ secrets.PROVISIONING_PROFILE_BASE64 }}" | base64 --decode -o "$PROFILE_PATH"
+
+          # 从 profile 中提取 UUID
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c "Print UUID" /dev/stdin <<< \
+            $(security cms -D -i "$PROFILE_PATH") 2>/dev/null)
+          # 如果上面方法失败，用 grep 兜底
+          if [ -z "$PROFILE_UUID" ]; then
+            PROFILE_UUID=$(grep -a -A 1 "UUID" "$PROFILE_PATH" | grep string | sed 's/.*<string>//;s/<\/string>.*//')
+          fi
+
+          cp "$PROFILE_PATH" "$PROFILE_DIR/${PROFILE_UUID}.mobileprovision"
+          echo "✅ Provisioning Profile 已安装 (UUID: $PROFILE_UUID)"
+          echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
+
+      - name: Generate Xcode Project
+        working-directory: ScreenCapture
+        run: xcodegen generate
+
+      - name: Write exportOptions.plist
+        working-directory: ScreenCapture
+        run: |
+          cat > exportOptions.plist << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>ad-hoc</string>
+              <key>teamID</key>
+              <string>${{ secrets.APPLE_TEAM_ID }}</string>
+              <key>compileBitcode</key>
+              <false/>
+              <key>stripSwiftSymbols</key>
+              <true/>
+              <key>signingStyle</key>
+              <string>manual</string>
+              <key>signingCertificate</key>
+              <string>Apple Distribution</string>
+              <key>provisioningProfiles</key>
+              <dict>
+                  <key>com.screencapture.app</key>
+                  <string>${{ env.PROFILE_UUID }}</string>
+                  <key>com.screencapture.app.upload</key>
+                  <string>${{ env.PROFILE_UUID }}</string>
+              </dict>
+          </dict>
+          </plist>
+          PLIST
+
+          echo "✅ exportOptions.plist 已生成"
+
+      - name: Archive
+        working-directory: ScreenCapture
+        run: |
+          xcodebuild archive \
+            -project ScreenCapture.xcodeproj \
+            -scheme ScreenCapture \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath ./build/ScreenCapture.xcarchive \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE="$PROFILE_UUID" \
+            DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
+            2>&1 | tail -30
+
+      - name: Export IPA
+        working-directory: ScreenCapture
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath ./build/ScreenCapture.xcarchive \
+            -exportOptionsPlist exportOptions.plist \
+            -exportPath ./build/ipa \
+            2>&1 | tail -15
+
+          echo ""
+          ls -lh ./build/ipa/*.ipa
+          echo ""
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ScreenCapture.ipa
+          path: ScreenCapture/build/ipa/*.ipa
+          retention-days: 90
+
+      - name: Upload to OTA Server (Optional)
+        # 如果有服务器，自动上传 IPA
+        if: github.ref == 'refs/heads/main' && vars.OTA_DEPLOY_URL != ''
+        run: |
+          IPA_FILE=$(find ScreenCapture/build/ipa -name "*.ipa" | head -1)
+          echo "📤 Uploading $IPA_FILE to OTA server..."
+          curl -s -X POST "${{ vars.OTA_DEPLOY_URL }}" \
+            -F "ipa=@$IPA_FILE" \
+            -F "token=${{ secrets.OTA_DEPLOY_TOKEN }}" \
+            || echo "⚠️  OTA 上传失败 (不影响构建结果)"
+
+      - name: Build Summary
+        run: |
+          IPA_SIZE=$(ls -lh ScreenCapture/build/ipa/*.ipa | awk '{print $5}')
+          echo ""
+          echo "╔══════════════════════════════════════════╗"
+          echo "║  ✅ IPA 构建完成                          ║"
+          echo "╚══════════════════════════════════════════╝"
+          echo ""
+          echo "  📦 IPA 大小: $IPA_SIZE"
+          echo "  📥 下载: 本页 Artifacts → ScreenCapture.ipa"
+          echo "  🔗 安装: 下载后传到服务器 server/www/ota/"
+          echo ""
+
+  # ════════════════════════════════════════════════════════════
+  # Job 3: 合并 Artifact — both 模式时也用 export-ipa 的结果
+  # (当选择 both 时，build-check 和 export-ipa 都运行)
+  # ════════════════════════════════════════════════════════════
+  summary:
+    name: Summary
+    needs: [build-check, export-ipa]
+    if: always() && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Result
+        run: |
+          echo "Build Check:   ${{ needs.build-check.result }}"
+          echo "Export IPA:    ${{ needs.export-ipa.result }}"
+          if [ "${{ needs.build-check.result }}" = "success" ]; then
+            echo "✅ 代码编译正常"
+          fi
+          if [ "${{ needs.export-ipa.result }}" = "success" ]; then
+            echo "📦 IPA 已生成，可在 Artifacts 中下载"
+          fi

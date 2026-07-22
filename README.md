@@ -139,7 +139,29 @@ docker compose down -v
 
 ## 二、iOS 客户端构建与打包
 
-> **以下所有操作在 Mac 上执行。** 需要 Xcode 15+ 和 Apple ID。
+> **方式一: GitHub Actions CI (推荐，无需 Mac)**
+>
+> 如果你没有 Mac，可以用 GitHub Actions 自动构建。
+>
+> ```bash
+> # 1. Fork 本项目到你的 GitHub
+> # 2. push 代码自动触发编译检查 (无需额外配置)
+> # 3. 要导出可安装的 IPA，按指引配置签名:
+> #    → 详见 .github/workflows/SIGNING-SETUP.md
+> # 4. 在 Actions → Build iOS Apps → Run workflow → export-ipa
+> # 5. 下载 Artifact → 得到 IPA
+> ```
+>
+> **配置签名 (一次性，需借一台 Mac 1-2 小时):**
+> ```bash
+> # 在 Mac 上运行自动化脚本:
+> bash scripts/ci-export-signing.sh
+> # 按提示操作 → 得到 4 个值 → 填入 GitHub Secrets → 完成
+> ```
+>
+> **方式二: 在 Mac 上本地构建 (传统方式)**
+>
+> 有一台 Mac 也可以用传统方式自己编译。
 
 ### 2.1 环境准备 (只需一次)
 

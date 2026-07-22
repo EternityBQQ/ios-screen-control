@@ -4,7 +4,7 @@ nginx-rtmp 推流/断流时回调，维护在线设备列表
 import json
 from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 streams: dict[str, dict] = {}
 
@@ -22,9 +22,15 @@ class APIHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _read_body(self) -> dict:
+        """解析 nginx-rtmp 回调的 URL-encoded 表单数据"""
         length = int(self.headers.get("Content-Length", 0))
-        raw = self.rfile.read(length)
-        return json.loads(raw) if raw else {}
+        raw = self.rfile.read(length).decode()
+        if not raw:
+            return {}
+        # nginx-rtmp 发送 application/x-www-form-urlencoded
+        parsed = parse_qs(raw)
+        # parse_qs 返回 {key: [value]}，展开为 {key: value}
+        return {k: v[0] if isinstance(v, list) and len(v) == 1 else v for k, v in parsed.items()}
 
     def do_GET(self) -> None:
         path = urlparse(self.path).path
