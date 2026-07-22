@@ -1,140 +1,169 @@
-# iOS 签名配置指南 (For GitHub Actions CI)
+# iOS 签名配置指南 — 零 Mac 方案
 
-没有 Mac 也能通过 GitHub Actions 自动构建 iOS App。但生成**可安装的 IPA** 需要 Apple 签名证书。
-
-本指南覆盖两种场景：
-
-| 场景 | 需要 Mac 吗 | 产出物 |
-|------|------------|--------|
-| **A. 仅编译检查** | ❌ 不需要 | 验证代码能编译，不能安装 |
-| **B. 导出可安装 IPA** | 需要 (一次性) | 可安装到 iPhone 的 IPA |
+> **核心思路**: GitHub Actions 的 macOS runner 本身就是一台 Mac。CI 可以自己生成密钥和 CSR，你只需要一个浏览器完成 Apple 端的操作。
 
 ---
 
-## 场景 A: 编译检查 (零配置)
+## 三种方案速览
 
-**什么都不用做。** 每次 push 代码到 GitHub，CI 自动验证代码能否编译通过。
-
-- 在 GitHub 仓库页面 → Actions → 查看 Build Check 结果
-- 编译失败会收到邮件通知
+| 方案 | 需要什么 | 产物 | 有效期 |
+|------|---------|------|--------|
+| **A. 编译检查** (默认) | 无 | 验证编译 | — |
+| **B. 自动签名** | 免费 Apple ID + 专用密码 | 可安装 IPA | 7 天 |
+| **C. 手动签名** (推荐) | 付费开发者账号 ($99/年) | 可安装 IPA | 1 年 |
 
 ---
 
-## 场景 B: 导出可安装 IPA
+## 方案 A: 编译检查
 
-需要一次性在 Mac 上提取签名证书和描述文件，然后存入 GitHub Secrets。
+**什么都不用做。** push 代码 → CI 自动验证编译。
 
-### 前提
+---
 
-- 一个 **Apple ID**（免费即可，注册地址: https://appleid.apple.com）
-- **一次性**借用 Mac（朋友、公司、或云服务 MacinCloud/MacStadium）
-- GitHub 仓库
+## 方案 B: 自动签名 (免费 Apple ID)
 
-### 步骤 1: 在 Mac 上生成签名证书 (仅一次)
+> ⚠️ 此方案尝试在 CI 中用 Xcode 自动管理签名。由于 Apple 的认证机制，有一定概率失败。失败了就用方案 C。
 
-在 Mac 上打开 **终端 (Terminal)**，执行：
+### 步骤
 
-```bash
-# 1. 创建证书签名请求 (CSR)
-openssl genrsa -out ios_distribution.key 2048
-openssl req -new -key ios_distribution.key -out ios_distribution.csr \
-  -subj "/emailAddress=your@email.com/CN=ScreenCapture CI/O=Personal"
+**1. 获取 Apple ID 专用密码 (2 分钟)**
 
-# 2. 打开 Keychain Access
-open /System/Library/Keychain\ Access.app
+打开 https://appleid.apple.com → 登录你的 Apple ID
+→ **Sign-In and Security** → **App-Specific Passwords**
+→ 点 + 号，名称填 `GitHub CI`，复制生成的密码
 
-# 3. Keychain Access → Certificate Assistant → Create a Certificate
-#    - Name: "ScreenCapture CI"
-#    - Identity Type: Self Signed Root
-#    - Certificate Type: Code Signing
-#    - ☑ Let me override defaults
-#    - 点 Continue 直到生成完成
+**2. 获取 Team ID**
+
+打开 https://developer.apple.com/account → 登录
+→ **Membership** → 复制 Team ID (10 位字母数字)
+
+**3. 添加到 GitHub Secrets**
+
+仓库 → **Settings** → **Secrets and variables** → **Actions** → New secret:
+
+| Secret | 值 |
+|--------|-----|
+| `APPLE_ID_EMAIL` | 你的 Apple ID 邮箱 |
+| `APPLE_APP_SPECIFIC_PASSWORD` | 第一步生成的专用密码 |
+| `APPLE_TEAM_ID` | 第二步的 Team ID |
+
+**4. 触发构建**
+
+Actions → Build iOS Apps → Run workflow → 选 `auto-sign` → Run
+
+---
+
+## 方案 C: 手动签名 (付费开发者 $99/年) — 零 Mac，最可靠 ✅
+
+**整个流程不需要 Mac。** CI 生成 CSR → 你浏览器上传 Apple → CI 签名。
+
+### 步骤 1: CI 生成 CSR
+
+Actions → Build iOS Apps → Run workflow → 选 `generate-csr` → Run
+
+等 2 分钟 → 下载 Artifact **signing-csr.zip** 解压得到 `ci-signing.csr`
+
+### 步骤 2: Apple 网站创建证书 (纯浏览器操作)
+
+打开 https://developer.apple.com/account → 登录:
+
+```
+☐ Certificates, Identifiers & Profiles
+  ├─ Certificates → +
+  │   └─ 选 "Apple Distribution" (分发) 或 "iOS App Development" (开发)
+  │       └─ 上传 ci-signing.csr → 下载 .cer 文件
+  │
+  ├─ Identifiers → +
+  │   ├─ App ID: com.screencapture.app
+  │   └─ App ID: com.screencapture.app.upload
+  │
+  ├─ Devices → +
+  │   └─ 输入 iPhone UDID (获取: iPhone Safari 打开 udid.io)
+  │
+  └─ Profiles → +
+      ├─ 选 "App Store Connect" 或 "iOS App Development"
+      ├─ 选 App ID: com.screencapture.app
+      ├─ 选刚创建的证书
+      ├─ 选设备
+      └─ 下载 .mobileprovision 文件
 ```
 
-然后导出为 .p12：
+### 步骤 3: 编码并填入 GitHub Secrets
+
+在 **Gitee/GitHub Actions 的 macOS runner 上**(或你本地 Linux 的终端):
 
 ```bash
-# 4. 在 Keychain Access 中找到刚创建的证书 (搜索 "ScreenCapture CI")
-#    右键 → Export → 保存为 build-certificate.p12
-#    设置密码 (记下来! 这就是 P12_PASSWORD)
+# 对下载的 .cer 编码
+base64 -i ~/Downloads/ios_distribution.cer
 
-# 5. 编码为 Base64 (用于 GitHub Secrets)
-base64 -i ~/Desktop/build-certificate.p12 -o ~/Desktop/cert-base64.txt
+# 对下载的私钥（来自 signing-key-protected Artifact）编码
+base64 -i ~/Downloads/ci-signing.key
+
+# 对下载的 .mobileprovision 编码
+base64 -i ~/Downloads/YourApp.mobileprovision
 ```
 
-### 步骤 2: 创建 App ID 和 Provisioning Profile
+填入 GitHub Secrets:
 
-打开 https://developer.apple.com → 用 Apple ID 登录：
+| Secret | 值 |
+|--------|-----|
+| `APPLE_TEAM_ID` | 你的 Team ID |
+| `BUILD_CERTIFICATE_BASE64` | .cer 文件的 base64 |
+| `CERTIFICATE_KEY_BASE64` | ci-signing.key 的 base64 |
+| `PROVISIONING_PROFILE_BASE64` | .mobileprovision 的 base64 |
 
-1. **Certificates, Identifiers & Profiles** → **Identifiers** → **+**
-2. 创建 App ID:
-   - Type: App
-   - Bundle ID: `com.screencapture.app`
-   - Capabilities: App Groups
-3. 再创建 Extension App ID:
-   - Bundle ID: `com.screencapture.app.upload`
-   - Capabilities: App Groups
-4. **App Groups** → **+** → `group.com.screencapture.app`
-5. **Profiles** → **+** → Development → 选择上述 App ID → 选择证书 → 选择设备 → 下载
+### 步骤 4: 构建
 
-### 步骤 3: 获取设备 UDID
+Actions → Build iOS Apps → Run workflow → 选 `manual-sign` → Run
 
-```bash
-# 在 iPhone Safari 打开:
-# https://udid.io
-# 按指引安装临时 Profile → 获取 UDID 发送到邮箱
-```
-
-### 步骤 4: 添加到 GitHub Secrets
-
-在 GitHub 仓库 → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**：
-
-| Secret 名称 | 值 |
-|-------------|-----|
-| `APPLE_TEAM_ID` | 你的 Team ID (在 https://developer.apple.com/account 查看) |
-| `BUILD_CERTIFICATE_BASE64` | `cert-base64.txt` 文件内容 |
-| `P12_PASSWORD` | 导出 .p12 时设置的密码 |
-| `PROVISIONING_PROFILE_BASE64` | `base64 -i ~/Downloads/YourProfile.mobileprovision` 输出 |
-
-### 步骤 5: 触发构建
-
-1. GitHub 仓库 → **Actions** → **Build iOS Apps** → **Run workflow**
-2. 选择 `export-ipa` → 点击 **Run workflow**
-3. 等待 ~15 分钟
-4. 在构建结果页 → **Artifacts** → 下载 `ScreenCapture.ipa`
+10 分钟后 → Artifacts → 下载 **ScreenCapture-Signed.ipa**
 
 ---
 
-## 自动部署到 OTA 服务器 (可选)
+## 获取 iPhone UDID (无需 Mac)
 
-如果你有服务器运行着 `deploy.sh` 部署的服务，可以配置 CI 自动上传 IPA：
-
-1. 在服务器上创建一个上传接口（或直接用 SCP）
-2. 添加 GitHub Secrets:
-   - `OTA_DEPLOY_URL`: 上传接口 URL
-   - `OTA_DEPLOY_TOKEN`: 认证 Token
-3. 推送到 main 分支时 IPA 会自动上传
+1. iPhone Safari 打开 **https://udid.io**
+2. 点 "Tap to find UDID"
+3. 允许安装临时 Profile
+4. 页面显示 UDID → 复制/发到邮箱
 
 ---
 
-## 云 Mac 服务 (如果没有 Mac)
+## OTA 安装到 iPhone
 
-| 服务 | 价格 | 说明 |
-|------|------|------|
-| [MacinCloud](https://macincloud.com) | ~$1/小时 | 按小时租用，有 Xcode 预装 |
-| [MacStadium](https://macstadium.com) | ~$99/月 | 专用 Mac mini |
-| [AWS EC2 Mac](https://aws.amazon.com/ec2/mac/) | ~$1.08/小时 | AWS 托管 Mac mini |
+```bash
+# 1. 把 IPA 传到服务器
+scp ScreenCapture-Signed.ipa you@server:~/ios-screen-control/server/www/ota/ScreenCapture.ipa
 
-**推荐**: 租 MacinCloud 2-3 小时完成一次性证书配置，之后全靠 CI 自动构建。
+# 2. iPhone Safari 打开 OTA 页面
+# https://你的域名/ota/
+
+# 3. 首次打开需信任证书:
+#    设置 → 通用 → VPN与设备管理 → 信任
+```
 
 ---
 
 ## 签名有效期
 
-| 账号类型 | 签名方式 | 有效期 |
-|----------|----------|--------|
-| 免费 Apple ID | Development | **7 天** |
-| 个人开发者 ($99/年) | Ad-Hoc | **1 年** |
-| 企业开发者 ($299/年) | In-House | **1 年** |
+| 账号 | 证书类型 | 有效期 | 过期处理 |
+|------|---------|--------|----------|
+| 免费 Apple ID | Development | 7 天 | 重新触发 CI |
+| 个人开发者 ($99) | Distribution | 1 年 | 重新生成 CSR + 证书 |
+| 企业开发者 ($299) | Distribution | 1 年 | 重新生成 CSR + 证书 |
 
-> 免费账号每 7 天需重新触发 CI 构建，证书会自动续签。推荐用个人开发者账号（$99/年）。
+---
+
+## FAQ
+
+**Q: 为什么自动签名 (方案 B) 可能失败？**
+
+Apple 的 Xcode 自动签名设计为交互式使用。在 CI 中认证可能遇到 2FA 问题。方案 C 的手动签名通过 Apple Developer 网站操作，100% 可靠。
+
+**Q: 免费 Apple ID 能用方案 C 吗？**
+
+不能。免费 Apple ID 在 developer.apple.com 上没有创建证书和 Profile 的权限，只能通过 Xcode 自动管理。要方案 C 需要付费账号 ($99/年)。
+
+**Q: 我不想付 $99，也不想借 Mac，怎么办？**
+
+方案 B 值得一试。如果 Xcode 自动签名在 CI 中跑通了，你就彻底不需要 Mac。如果失败，考虑花 $99（个人开发者账号），之后一年都无需 Mac。

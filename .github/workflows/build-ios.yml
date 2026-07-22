@@ -1,15 +1,20 @@
 name: Build iOS Apps
 
 # ============================================================
-# CI/CD 自动构建 iOS App
+# iOS 自动构建 — 三种签名模式
 #
-# 触发方式:
-#   1. push/PR 到 main → 仅编译检查 (Build Check)
-#   2. 手动触发 (workflow_dispatch) → 编译 + 导出 IPA
+# 模式 A: 编译检查 (自动) — 无需任何配置
+#   每次 push 自动运行，验证代码能否编译
 #
-# 签名说明:
-#   - Build Check: 不需要签名，只验证代码能编译通过
-#   - IPA Export: 需要配置 GitHub Secrets (见下方说明)
+# 模式 B: 自动签名 (需 Apple ID) — 免费账号也能用
+#   在 CI 中用 Xcode 自动管理签名，需要 Apple ID + 专用密码
+#
+# 模式 C: 手动签名 (需开发者账号) — 最可靠
+#   CI 生成 CSR → 你浏览器上传到 Apple → CI 自动签名
+#
+# 触发:
+#   push/PR → 模式 A (自动)
+#   workflow_dispatch → 可选 模式 B 或 C
 # ============================================================
 
 on:
@@ -20,72 +25,41 @@ on:
   workflow_dispatch:
     inputs:
       build_type:
-        description: '构建类型'
+        description: '构建模式'
         required: true
         type: choice
-        default: 'both'
+        default: 'build-check'
         options:
-          - build-check      # 仅编译检查 (无需签名)
-          - export-ipa       # 导出 IPA (需要签名 Secrets)
-          - both             # 编译检查 + 导出 IPA
-      scheme:
-        description: 'Target Scheme'
-        required: true
-        type: choice
-        default: 'ScreenCapture'
-        options:
-          - ScreenCapture    # 屏幕采集发送端
-          - ScreenViewer     # iOS 原生观看端
+          - build-check                    # 仅编译检查 (零配置)
+          - auto-sign                      # 自动签名 (需 Apple ID Secrets)
+          - generate-csr                   # 生成 CSR (用来在 Apple 网站创建证书)
+          - manual-sign                    # 手动签名 (需完整证书 Secrets)
+          - full-release                   # 完整发布: CSR→提示配置→签名导出
 
 env:
-  # Xcode 版本 — GitHub Actions macOS runner 预装版本
   DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
 
 jobs:
   # ════════════════════════════════════════════════════════════
-  # Job 1: 编译检查 — 每次 push/PR 自动运行
+  # Job 1: 编译检查 — 零配置，每次 push 自动跑
   # ════════════════════════════════════════════════════════════
   build-check:
-    name: Build Check
-    # 自动触发: push/PR 时运行；手动触发: build-check 或 both 时运行
+    name: 🔍 Build Check (零配置)
     if: |
       github.event_name != 'workflow_dispatch' ||
       github.event.inputs.build_type == 'build-check' ||
-      github.event.inputs.build_type == 'both'
+      github.event.inputs.build_type == 'full-release'
     runs-on: macos-15
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Cache Homebrew
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/Library/Caches/Homebrew
-          key: brew-${{ runner.os }}-${{ hashFiles('.github/workflows/build-ios.yml') }}
+      - uses: actions/checkout@v4
 
       - name: Install XcodeGen
         run: brew install xcodegen
 
-      - name: Show Xcode Version
-        run: |
-          xcodebuild -version
-          xcodegen --version
-
-      - name: Generate Xcode Project (ScreenCapture)
-        if: github.event.inputs.scheme != 'ScreenViewer'
-        working-directory: ScreenCapture
-        run: xcodegen generate
-
-      - name: Generate Xcode Project (ScreenViewer)
-        if: github.event.inputs.scheme == 'ScreenViewer' || github.event_name != 'workflow_dispatch'
-        working-directory: ScreenViewer
-        run: xcodegen generate
-
-      - name: Build ScreenCapture (Verification Only)
-        if: github.event.inputs.scheme != 'ScreenViewer' || github.event_name != 'workflow_dispatch'
+      - name: Build ScreenCapture
         working-directory: ScreenCapture
         run: |
+          xcodegen generate
           xcodebuild build \
             -project ScreenCapture.xcodeproj \
             -scheme ScreenCapture \
@@ -95,16 +69,12 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            PROVISIONING_PROFILE_SPECIFIER="" \
-            DEVELOPMENT_TEAM="" \
-            2>&1 | tail -20
-        # 此步骤仅验证代码可编译，产物不可安装
-        # 若失败: 检查代码是否有语法/类型错误
+            2>&1 | tail -30
 
-      - name: Build ScreenViewer (Verification Only)
-        if: github.event.inputs.scheme == 'ScreenViewer' || github.event_name != 'workflow_dispatch'
+      - name: Build ScreenViewer
         working-directory: ScreenViewer
         run: |
+          xcodegen generate
           xcodebuild build \
             -project ScreenViewer.xcodeproj \
             -scheme ScreenViewer \
@@ -114,70 +84,315 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            PROVISIONING_PROFILE_SPECIFIER="" \
-            DEVELOPMENT_TEAM="" \
-            2>&1 | tail -20
+            2>&1 | tail -30
 
-      - name: Build Summary
+      - name: Summary
         run: |
           echo ""
-          echo "✅ Build Check 通过 — 代码编译正常"
-          echo ""
-          echo "📱 产物不可安装（未签名），仅用于验证代码正确性"
-          echo "🔑 要生成可安装的 IPA，请:"
-          echo "   1. 配置 GitHub Secrets (见下方说明)"
-          echo "   2. 在 Actions 页面手动触发 → 选择 export-ipa"
+          echo "✅ 编译检查通过 — 代码没问题"
+          echo "💡 要生成可安装的 IPA: Actions → Run workflow → 选其他模式"
           echo ""
 
   # ════════════════════════════════════════════════════════════
-  # Job 2: 导出 IPA — 手动触发，需要签名 Secrets
+  # Job 2: 生成 CSR — 零 Mac 方案的核心
+  # CI 自己生成密钥对 + CSR，你下载后上传到 Apple 网站
   # ════════════════════════════════════════════════════════════
-  export-ipa:
-    name: Export IPA
+  generate-csr:
+    name: 🔑 生成 CSR (免 Mac)
     if: |
       github.event_name == 'workflow_dispatch' &&
-      (github.event.inputs.build_type == 'export-ipa' || github.event.inputs.build_type == 'both')
+      (github.event.inputs.build_type == 'generate-csr' || github.event.inputs.build_type == 'full-release')
+    runs-on: macos-15
+    outputs:
+      key-base64: ${{ steps.generate.outputs.KEY_BASE64 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Private Key + CSR
+        id: generate
+        run: |
+          mkdir -p certs
+
+          # 1. 生成 2048 位 RSA 私钥
+          openssl genrsa -out certs/ci-signing.key 2048
+          echo "✅ 私钥已生成"
+
+          # 2. 生成 CSR (Certificate Signing Request)
+          #    emailAddress 填你的 Apple ID 邮箱
+          openssl req -new -key certs/ci-signing.key \
+            -out certs/ci-signing.csr \
+            -subj "/emailAddress=${{ secrets.APPLE_ID_EMAIL || 'your@email.com' }}/CN=CI Build/C=US"
+
+          echo "✅ CSR 已生成"
+
+          # 3. Base64 编码 (存为 output)
+          KEY_BASE64=$(base64 -i certs/ci-signing.key)
+          CSR_BASE64=$(base64 -i certs/ci-signing.csr)
+
+          echo "KEY_BASE64=${KEY_BASE64}" >> "$GITHUB_OUTPUT"
+
+          # 保存 CSR 内容用于展示
+          echo "${CSR_BASE64}" > certs/csr-base64.txt
+          echo ""
+          echo "━━━━━━━━━━━ CSR 文件已生成 ━━━━━━━━━━━"
+          echo ""
+          cat certs/ci-signing.csr
+          echo ""
+
+      - name: Upload CSR as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: signing-csr
+          path: |
+            certs/ci-signing.csr
+            certs/csr-base64.txt
+          retention-days: 7
+
+      - name: Upload Private Key as Secret-Level Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: signing-key-protected
+          path: certs/ci-signing.key
+          retention-days: 1
+        # ⚠️ 这个只保存 1 天，请尽快下载并使用
+
+      - name: Instructions
+        run: |
+          echo ""
+          echo "╔══════════════════════════════════════════════════╗"
+          echo "║  下一步: 在 Apple 开发者网站创建证书              ║"
+          echo "╚══════════════════════════════════════════════════╝"
+          echo ""
+          echo "  1. 下载此 Job 的 Artifacts:"
+          echo "     展开上方 Artifacts → 下载 signing-csr.zip"
+          echo ""
+          echo "  2. 打开浏览器: https://developer.apple.com/account"
+          echo "     → Certificates, Identifiers & Profiles"
+          echo "     → Certificates → 点 + 号"
+          echo "     → 选择 'iOS App Development' 或 'Apple Distribution'"
+          echo "     → 上传 ci-signing.csr 文件"
+          echo "     → 下载生成的 .cer 文件"
+          echo ""
+          echo "  3. 创建 App ID (Identifiers → +):"
+          echo "     - Bundle ID: com.screencapture.app"
+          echo "     - Bundle ID: com.screencapture.app.upload"
+          echo ""
+          echo "  4. 创建 Provisioning Profile (Profiles → +):"
+          echo "     - 类型: iOS App Development"
+          echo "     - App ID: com.screencapture.app"
+          echo "     - 证书: 选择刚创建的证书"
+          echo "     - 设备: 添加你的 iPhone UDID"
+          echo "     - 下载 .mobileprovision 文件"
+          echo ""
+          echo "  5. 将以下内容设为 GitHub Secrets:"
+          echo ""
+          echo "     APPLE_TEAM_ID          你的 Team ID"
+          echo "     BUILD_CERTIFICATE_BASE64   base64 -i 下载的.cer"
+          echo "     CERTIFICATE_KEY_BASE64     signing-key-protected 里的内容 base64 编码"
+          echo "     PROVISIONING_PROFILE_BASE64 base64 -i 下载的.mobileprovision"
+          echo ""
+          echo "     PLUS: 把 signing-key-protected Artifact 下载下来的 .key 文件"
+          echo "     用 base64 编码后填入 CERTIFICATE_KEY_BASE64"
+          echo ""
+          echo "  6. 配好后 → Actions → Build iOS Apps → Run workflow"
+          echo "     → 选 'manual-sign' → 构建签名 IPA"
+          echo ""
+
+  # ════════════════════════════════════════════════════════════
+  # Job 3: 自动签名 — Xcode 自动管理 (需 Apple ID)
+  # ════════════════════════════════════════════════════════════
+  auto-sign:
+    name: 🤖 自动签名 (Xcode 自动管理)
+    if: |
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.build_type == 'auto-sign'
     runs-on: macos-15
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Check Signing Secrets
+      - name: Check Auto-Sign Secrets
         run: |
           MISSING=""
-          if [ -z "${{ secrets.APPLE_TEAM_ID }}" ]; then
-            MISSING="$MISSING APPLE_TEAM_ID"
-          fi
-          if [ -z "${{ secrets.BUILD_CERTIFICATE_BASE64 }}" ]; then
-            MISSING="$MISSING BUILD_CERTIFICATE_BASE64"
-          fi
-          if [ -z "${{ secrets.P12_PASSWORD }}" ]; then
-            MISSING="$MISSING P12_PASSWORD"
-          fi
-          if [ -z "${{ secrets.PROVISIONING_PROFILE_BASE64 }}" ]; then
-            MISSING="$MISSING PROVISIONING_PROFILE_BASE64"
-          fi
-
+          if [ -z "${{ secrets.APPLE_ID_EMAIL }}" ]; then MISSING="$MISSING APPLE_ID_EMAIL"; fi
+          if [ -z "${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}" ]; then MISSING="$MISSING APPLE_APP_SPECIFIC_PASSWORD"; fi
+          if [ -z "${{ secrets.APPLE_TEAM_ID }}" ]; then MISSING="$MISSING APPLE_TEAM_ID"; fi
           if [ -n "$MISSING" ]; then
-            echo "❌ 缺少以下 GitHub Secrets: $MISSING"
+            echo "❌ 缺少 Secrets: $MISSING"
             echo ""
-            echo "请先完成签名配置，详见 .github/workflows/SIGNING-SETUP.md"
+            echo "  如何获取:"
+            echo "  1. APPLE_ID_EMAIL: 你的 Apple ID 邮箱"
+            echo "  2. APPLE_APP_SPECIFIC_PASSWORD:"
+            echo "     打开 https://appleid.apple.com → 登录"
+            echo "     → Sign-In and Security → App-Specific Passwords"
+            echo "     → 生成一个密码 (名称随便填)"
+            echo "  3. APPLE_TEAM_ID: https://developer.apple.com/account → Membership"
+            echo ""
             exit 1
           fi
-          echo "✅ 所有签名 Secrets 已配置"
-
-      - name: Cache Homebrew
-        uses: actions/cache@v4
-        with:
-          path: ~/Library/Caches/Homebrew
-          key: brew-${{ runner.os }}-${{ hashFiles('.github/workflows/build-ios.yml') }}
+          echo "✅ Apple ID 登录信息已配置"
 
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Setup Keychain for Xcode Auth
+        run: |
+          # 创建临时 keychain
+          KEYCHAIN_PATH="$RUNNER_TEMP/ci.keychain-db"
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed 's/["]//g')
+          security default-keychain -s "$KEYCHAIN_PATH"
+
+          # 允许访问
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # 将 Apple ID 凭据添加到 keychain (供 Xcode 使用)
+          # Xcode 会从 keychain 中查找 "Xcode-*" 凭据
+          security add-generic-password \
+            -a "${{ secrets.APPLE_ID_EMAIL }}" \
+            -s "Xcode-AlternateDSID-${{ secrets.APPLE_TEAM_ID }}" \
+            -w "${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}" \
+            -T /usr/bin/security \
+            -T /Applications/Xcode.app \
+            "$KEYCHAIN_PATH" 2>/dev/null || true
+
+          echo "✅ Keychain 已配置"
+
+      - name: Generate Xcode Project
+        working-directory: ScreenCapture
+        run: xcodegen generate
+
+      - name: Archive with Auto Signing
+        working-directory: ScreenCapture
+        run: |
+          xcodebuild archive \
+            -project ScreenCapture.xcodeproj \
+            -scheme ScreenCapture \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath ./build/ScreenCapture.xcarchive \
+            CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
+            -allowProvisioningUpdates \
+            -allowProvisioningDeviceRegistration \
+            -authenticationKeyIssuerID "" \
+            -authenticationKeyID "" \
+            -authenticationKeyPath "" \
+            2>&1 | tail -40
+
+      - name: Export IPA
+        working-directory: ScreenCapture
+        run: |
+          cat > exportOptions.plist << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>development</string>
+              <key>teamID</key>
+              <string>${{ secrets.APPLE_TEAM_ID }}</string>
+              <key>signingStyle</key>
+              <string>automatic</string>
+              <key>compileBitcode</key>
+              <false/>
+              <key>stripSwiftSymbols</key>
+              <true/>
+          </dict>
+          </plist>
+          PLIST
+
+          xcodebuild -exportArchive \
+            -archivePath ./build/ScreenCapture.xcarchive \
+            -exportOptionsPlist exportOptions.plist \
+            -exportPath ./build/ipa \
+            -allowProvisioningUpdates \
+            2>&1 | tail -20
+
+          ls -lh ./build/ipa/*.ipa 2>/dev/null || echo "⚠️ IPA 未生成，查看上方日志"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ScreenCapture-Development.ipa
+          path: ScreenCapture/build/ipa/*.ipa
+          retention-days: 90
+        continue-on-error: true
+
+      - name: Summary
+        run: |
+          echo ""
+          echo "⚠️ 自动签名依赖 Apple 服务器，可能因认证问题失败"
+          echo "   如果失败 → 用 'generate-csr' 模式 (更可靠)"
+          echo "   成功后 → 下载 Artifacts 中的 IPA"
+          echo ""
+
+  # ════════════════════════════════════════════════════════════
+  # Job 4: 手动签名 — 用你提供的证书和 Profile 签名
+  # ════════════════════════════════════════════════════════════
+  manual-sign:
+    name: 🔐 手动签名 (最可靠)
+    if: |
+      github.event_name == 'workflow_dispatch' &&
+      (github.event.inputs.build_type == 'manual-sign' || github.event.inputs.build_type == 'full-release')
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Manual Sign Secrets
+        run: |
+          MISSING=""
+          if [ -z "${{ secrets.APPLE_TEAM_ID }}" ]; then MISSING="$MISSING APPLE_TEAM_ID"; fi
+          if [ -z "${{ secrets.BUILD_CERTIFICATE_BASE64 }}" ]; then
+            if [ -z "${{ secrets.CERTIFICATE_KEY_BASE64 }}" ]; then
+              MISSING="$MISSING BUILD_CERTIFICATE_BASE64(or CERTIFICATE_KEY_BASE64)"
+            fi
+          fi
+          if [ -z "${{ secrets.PROVISIONING_PROFILE_BASE64 }}" ]; then MISSING="$MISSING PROVISIONING_PROFILE_BASE64"; fi
+          if [ -n "$MISSING" ]; then
+            echo "❌ 缺少 Secrets: $MISSING"
+            echo ""
+            echo "  先运行 'generate-csr' 模式获取 CSR"
+            echo "  然后去 https://developer.apple.com 创建证书和 Profile"
+            echo "  详见 generate-csr Job 的输出说明"
+            echo ""
+            exit 1
+          fi
+          echo "✅ 签名 Secrets 已配置"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Build P12 from Key + Certificate
+        run: |
+          mkdir -p certs
+
+          # 如果用户提供了完整的 .p12
+          if [ -n "${{ secrets.BUILD_CERTIFICATE_BASE64 }}" ]; then
+            echo "${{ secrets.BUILD_CERTIFICATE_BASE64 }}" | base64 --decode > certs/signing.p12
+            echo "P12_PASSWORD=${{ secrets.P12_PASSWORD }}" >> "$GITHUB_ENV"
+            echo "✅ 使用预打包的 .p12 证书"
+          else
+            # 从私钥 + .cer 合成 .p12
+            echo "${{ secrets.CERTIFICATE_KEY_BASE64 }}" | base64 --decode > certs/private.key
+            echo "${{ secrets.BUILD_CERTIFICATE_BASE64 }}" | base64 --decode > certs/certificate.cer
+            P12_PASS=$(openssl rand -base64 24)
+            echo "P12_PASSWORD=${P12_PASS}" >> "$GITHUB_ENV"
+
+            openssl pkcs12 -export \
+              -inkey certs/private.key \
+              -in certs/certificate.cer \
+              -out certs/signing.p12 \
+              -passout "pass:${P12_PASS}"
+
+            echo "✅ 从私钥 + 证书合成 .p12"
+          fi
+
       - name: Setup Keychain & Import Certificate
         run: |
-          # 创建临时 Keychain
           KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
 
@@ -185,23 +400,18 @@ jobs:
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
-          # 导入签名证书
-          CERT_PATH="$RUNNER_TEMP/build-certificate.p12"
-          echo "${{ secrets.BUILD_CERTIFICATE_BASE64 }}" | base64 --decode -o "$CERT_PATH"
-          security import "$CERT_PATH" \
+          security import certs/signing.p12 \
             -k "$KEYCHAIN_PATH" \
-            -P "${{ secrets.P12_PASSWORD }}" \
+            -P "$P12_PASSWORD" \
             -T /usr/bin/codesign \
-            -T /usr/bin/security
+            -T /usr/bin/security \
+            -T /usr/bin/xcodebuild
 
-          # 添加到搜索列表并设为默认
           security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed 's/["]//g')
           security default-keychain -s "$KEYCHAIN_PATH"
-
-          # 允许 codesign 无弹窗访问
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
-          echo "✅ Keychain 已配置"
+          echo "✅ Keychain 配置完成"
 
       - name: Install Provisioning Profile
         run: |
@@ -211,32 +421,58 @@ jobs:
           PROFILE_PATH="$RUNNER_TEMP/profile.mobileprovision"
           echo "${{ secrets.PROVISIONING_PROFILE_BASE64 }}" | base64 --decode -o "$PROFILE_PATH"
 
-          # 从 profile 中提取 UUID
-          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c "Print UUID" /dev/stdin <<< \
-            $(security cms -D -i "$PROFILE_PATH") 2>/dev/null)
-          # 如果上面方法失败，用 grep 兜底
-          if [ -z "$PROFILE_UUID" ]; then
-            PROFILE_UUID=$(grep -a -A 1 "UUID" "$PROFILE_PATH" | grep string | sed 's/.*<string>//;s/<\/string>.*//')
-          fi
+          # 提取 UUID
+          PROFILE_UUID=$(security cms -D -i "$PROFILE_PATH" 2>/dev/null | \
+            /usr/libexec/PlistBuddy -c "Print UUID" /dev/stdin 2>/dev/null || \
+            grep -aA1 "UUID" "$PROFILE_PATH" | grep string | sed 's/.*<string>//;s/<\/string>.*//')
 
           cp "$PROFILE_PATH" "$PROFILE_DIR/${PROFILE_UUID}.mobileprovision"
-          echo "✅ Provisioning Profile 已安装 (UUID: $PROFILE_UUID)"
-          echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
+          echo "PROFILE_UUID=${PROFILE_UUID}" >> "$GITHUB_ENV"
+          echo "✅ Provisioning Profile: $PROFILE_UUID"
 
-      - name: Generate Xcode Project
-        working-directory: ScreenCapture
-        run: xcodegen generate
-
-      - name: Write exportOptions.plist
+      - name: Generate Xcode Project & Build
         working-directory: ScreenCapture
         run: |
-          cat > exportOptions.plist << 'PLIST'
+          xcodegen generate
+
+          # 自动检测证书类型 (Apple Development / Apple Distribution)
+          CERT_TYPE=$(security find-identity -v -p codesigning | \
+            grep -oE '"Apple (Development|Distribution)[^"]*"' | head -1 | tr -d '"' || \
+            echo "Apple Development")
+
+          echo "CERT_TYPE=${CERT_TYPE}" >> "$GITHUB_ENV"
+          echo "  证书类型: $CERT_TYPE"
+
+          xcodebuild archive \
+            -project ScreenCapture.xcodeproj \
+            -scheme ScreenCapture \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath ./build/ScreenCapture.xcarchive \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="$CERT_TYPE" \
+            PROVISIONING_PROFILE="$PROFILE_UUID" \
+            DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
+            OTHER_CODE_SIGN_FLAGS="--keychain $RUNNER_TEMP/signing.keychain-db" \
+            2>&1 | tail -30
+
+      - name: Export IPA
+        working-directory: ScreenCapture
+        run: |
+          # 根据证书类型决定 export method
+          if echo "$CERT_TYPE" | grep -q "Distribution"; then
+            METHOD="ad-hoc"
+          else
+            METHOD="development"
+          fi
+
+          cat > exportOptions.plist << PLISTEOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
               <key>method</key>
-              <string>ad-hoc</string>
+              <string>${METHOD}</string>
               <key>teamID</key>
               <string>${{ secrets.APPLE_TEAM_ID }}</string>
               <key>compileBitcode</key>
@@ -246,96 +482,44 @@ jobs:
               <key>signingStyle</key>
               <string>manual</string>
               <key>signingCertificate</key>
-              <string>Apple Distribution</string>
+              <string>${CERT_TYPE}</string>
               <key>provisioningProfiles</key>
               <dict>
                   <key>com.screencapture.app</key>
-                  <string>${{ env.PROFILE_UUID }}</string>
+                  <string>${PROFILE_UUID}</string>
                   <key>com.screencapture.app.upload</key>
-                  <string>${{ env.PROFILE_UUID }}</string>
+                  <string>${PROFILE_UUID}</string>
               </dict>
           </dict>
           </plist>
-          PLIST
+          PLISTEOF
 
-          echo "✅ exportOptions.plist 已生成"
-
-      - name: Archive
-        working-directory: ScreenCapture
-        run: |
-          xcodebuild archive \
-            -project ScreenCapture.xcodeproj \
-            -scheme ScreenCapture \
-            -configuration Release \
-            -sdk iphoneos \
-            -archivePath ./build/ScreenCapture.xcarchive \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
-            PROVISIONING_PROFILE="$PROFILE_UUID" \
-            DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
-            2>&1 | tail -30
-
-      - name: Export IPA
-        working-directory: ScreenCapture
-        run: |
           xcodebuild -exportArchive \
             -archivePath ./build/ScreenCapture.xcarchive \
             -exportOptionsPlist exportOptions.plist \
             -exportPath ./build/ipa \
-            2>&1 | tail -15
+            2>&1 | tail -20
 
           echo ""
           ls -lh ./build/ipa/*.ipa
-          echo ""
 
-      - name: Upload IPA Artifact
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: ScreenCapture.ipa
+          name: ScreenCapture-Signed.ipa
           path: ScreenCapture/build/ipa/*.ipa
           retention-days: 90
 
-      - name: Upload to OTA Server (Optional)
-        # 如果有服务器，自动上传 IPA
-        if: github.ref == 'refs/heads/main' && vars.OTA_DEPLOY_URL != ''
-        run: |
-          IPA_FILE=$(find ScreenCapture/build/ipa -name "*.ipa" | head -1)
-          echo "📤 Uploading $IPA_FILE to OTA server..."
-          curl -s -X POST "${{ vars.OTA_DEPLOY_URL }}" \
-            -F "ipa=@$IPA_FILE" \
-            -F "token=${{ secrets.OTA_DEPLOY_TOKEN }}" \
-            || echo "⚠️  OTA 上传失败 (不影响构建结果)"
-
-      - name: Build Summary
+      - name: Summary
         run: |
           IPA_SIZE=$(ls -lh ScreenCapture/build/ipa/*.ipa | awk '{print $5}')
           echo ""
           echo "╔══════════════════════════════════════════╗"
-          echo "║  ✅ IPA 构建完成                          ║"
+          echo "║  ✅ 签名 IPA 构建完成                     ║"
           echo "╚══════════════════════════════════════════╝"
           echo ""
-          echo "  📦 IPA 大小: $IPA_SIZE"
-          echo "  📥 下载: 本页 Artifacts → ScreenCapture.ipa"
-          echo "  🔗 安装: 下载后传到服务器 server/www/ota/"
+          echo "  📦 大小: $IPA_SIZE"
+          echo "  📥 下载: 本页 Artifacts → ScreenCapture-Signed.ipa"
+          echo "  📲 安装: scp 到服务器 → server/www/ota/"
+          echo "           iPhone Safari → https://你的域名/ota/"
           echo ""
-
-  # ════════════════════════════════════════════════════════════
-  # Job 3: 合并 Artifact — both 模式时也用 export-ipa 的结果
-  # (当选择 both 时，build-check 和 export-ipa 都运行)
-  # ════════════════════════════════════════════════════════════
-  summary:
-    name: Summary
-    needs: [build-check, export-ipa]
-    if: always() && github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Result
-        run: |
-          echo "Build Check:   ${{ needs.build-check.result }}"
-          echo "Export IPA:    ${{ needs.export-ipa.result }}"
-          if [ "${{ needs.build-check.result }}" = "success" ]; then
-            echo "✅ 代码编译正常"
-          fi
-          if [ "${{ needs.export-ipa.result }}" = "success" ]; then
-            echo "📦 IPA 已生成，可在 Artifacts 中下载"
-          fi
