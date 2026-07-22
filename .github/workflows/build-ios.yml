@@ -215,7 +215,6 @@ jobs:
           MISSING=""
           if [ -z "${{ secrets.APPLE_ID_EMAIL }}" ]; then MISSING="$MISSING APPLE_ID_EMAIL"; fi
           if [ -z "${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}" ]; then MISSING="$MISSING APPLE_APP_SPECIFIC_PASSWORD"; fi
-          if [ -z "${{ secrets.APPLE_TEAM_ID }}" ]; then MISSING="$MISSING APPLE_TEAM_ID"; fi
           if [ -n "$MISSING" ]; then
             echo "❌ 缺少 Secrets: $MISSING"
             echo ""
@@ -225,11 +224,18 @@ jobs:
             echo "     打开 https://appleid.apple.com → 登录"
             echo "     → Sign-In and Security → App-Specific Passwords"
             echo "     → 生成一个密码 (名称随便填)"
-            echo "  3. APPLE_TEAM_ID: https://developer.apple.com/account → Membership"
             echo ""
             exit 1
           fi
           echo "✅ Apple ID 登录信息已配置"
+
+          # Team ID 可选 — Xcode 会自己发现
+          if [ -n "${{ secrets.APPLE_TEAM_ID }}" ]; then
+            echo "✅ 使用指定的 Team ID: ${{ secrets.APPLE_TEAM_ID }}"
+          else
+            echo "ℹ️  未指定 Team ID，将由 Xcode 自动发现"
+            echo "AUTO_DETECT_TEAM=1" >> "$GITHUB_ENV"
+          fi
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -268,6 +274,17 @@ jobs:
       - name: Archive with Auto Signing
         working-directory: ScreenCapture
         run: |
+          # 构建签名参数
+          if [ -n "${{ secrets.APPLE_TEAM_ID }}" ]; then
+            TEAM_ARG="DEVELOPMENT_TEAM=${{ secrets.APPLE_TEAM_ID }}"
+          else
+            # 不指定 Team，Xcode 自动从 Apple ID 关联的 Team 中选择
+            TEAM_ARG=""
+          fi
+
+          echo "  签名参数: $TEAM_ARG"
+          echo "  (如无 Team ID，Xcode 将自动发现)"
+
           xcodebuild archive \
             -project ScreenCapture.xcodeproj \
             -scheme ScreenCapture \
@@ -275,18 +292,40 @@ jobs:
             -sdk iphoneos \
             -archivePath ./build/ScreenCapture.xcarchive \
             CODE_SIGN_STYLE=Automatic \
-            DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
+            ${TEAM_ARG} \
             -allowProvisioningUpdates \
             -allowProvisioningDeviceRegistration \
-            -authenticationKeyIssuerID "" \
-            -authenticationKeyID "" \
-            -authenticationKeyPath "" \
-            2>&1 | tail -40
+            2>&1 | tee /tmp/archive.log | tail -50
+
+          # 检查是否成功
+          if [ -d "./build/ScreenCapture.xcarchive" ]; then
+            echo "✅ Archive 成功"
+          else
+            echo ""
+            echo "❌ Archive 失败，下面是完整日志:"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            cat /tmp/archive.log
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            exit 1
+          fi
 
       - name: Export IPA
         working-directory: ScreenCapture
         run: |
-          cat > exportOptions.plist << 'PLIST'
+          # 获取 Team ID (如果没指定，从 archive 产物中解析)
+          if [ -n "${{ secrets.APPLE_TEAM_ID }}" ]; then
+            TEAM="${{ secrets.APPLE_TEAM_ID }}"
+          else
+            # 尝试从 provisioning profile 中提取 Team ID
+            TEAM=$(grep -r "TeamIdentifier" "./build/ScreenCapture.xcarchive" 2>/dev/null | head -1 | grep -oE '[A-Z0-9]{10}' || echo "")
+            if [ -z "$TEAM" ]; then
+              echo "⚠️ 未能自动检测 Team ID"
+              TEAM="AUTO_DETECT"
+            fi
+          fi
+          echo "  Team ID: $TEAM"
+
+          cat > exportOptions.plist << PLISTEOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -294,7 +333,7 @@ jobs:
               <key>method</key>
               <string>development</string>
               <key>teamID</key>
-              <string>${{ secrets.APPLE_TEAM_ID }}</string>
+              <string>${TEAM}</string>
               <key>signingStyle</key>
               <string>automatic</string>
               <key>compileBitcode</key>
@@ -303,7 +342,7 @@ jobs:
               <true/>
           </dict>
           </plist>
-          PLIST
+          PLISTEOF
 
           xcodebuild -exportArchive \
             -archivePath ./build/ScreenCapture.xcarchive \
