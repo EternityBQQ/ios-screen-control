@@ -20,7 +20,16 @@ jobs:
 
           echo "  正在开启屏幕共享..."
 
-          # 开启 VNC 远程管理
+          # 先彻底停掉
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -deactivate -stop 2>/dev/null || true
+
+          # 开启系统级屏幕共享
+          sudo defaults write /var/db/launchd.db/com.apple.launchd/overrides.plist \
+            com.apple.screensharing -dict Disabled -bool false
+          sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.screensharing.plist 2>/dev/null || true
+
+          # 开启 VNC 远程管理 (legacy VNC 协议，iPhone VNC Viewer 需要这个)
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
             -activate -configure -access -on \
             -clientopts -setvnclegacy -vnclegacy yes \
@@ -33,6 +42,23 @@ jobs:
           sleep 3
           lsof -i :5900 | head -5
           echo "VNC_PASS=$VNC_PASS" >> "$GITHUB_ENV"
+
+      - name: 唤醒显示器 + 打开 Xcode
+        run: |
+          # 防止显示器休眠
+          caffeinate -d -i -m -s &
+          echo "✅ 显示器保持唤醒"
+
+          # 重启 WindowServer 相关服务
+          sudo launchctl start com.apple.screensharing 2>/dev/null || true
+
+          # 打开 Xcode
+          open -a Xcode
+          sleep 5
+
+          # 截个图确认桌面正常
+          screencapture /tmp/desktop.png
+          echo "✅ 桌面截图已保存 (验证用)"
 
       - name: 安装 bore 隧道工具
         run: |
