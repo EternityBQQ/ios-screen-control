@@ -73,43 +73,73 @@ jobs:
           chmod +x /usr/local/bin/bore
           echo "✅ bore 已安装"
 
-      - name: 启动隧道 + 显示连接信息
+      - name: 启动隧道 (多路同时尝试)
         timeout-minutes: 55
         run: |
-          echo ""
-          echo "╔══════════════════════════════════════════════╗"
-          echo "║     🖥️  macOS 远程桌面已就绪                   ║"
-          echo "╠══════════════════════════════════════════════╣"
-          echo "║                                              ║"
-          echo "║  📲 iPhone 操作步骤:                          ║"
-          echo "║  1. App Store 下载 'VNC Viewer'              ║"
-          echo "║  2. 打开 App，点 + 添加连接                   ║"
-          echo "║  3. 地址: 等下会显示在下方                     ║"
-          echo "║  4. 密码: iosdev123                          ║"
-          echo "║                                              ║"
-          echo "║  🖥️  连上后操作:                              ║"
-          echo "║  1. Dock 栏点 Xcode 图标                     ║"
-          echo "║  2. 菜单栏 Xcode → Settings → Accounts       ║"
-          echo "║  3. 左下角 + → 登录你的 Apple ID              ║"
-          echo "║  4. 等 30 秒出现 Personal Team              ║"
-          echo "║  5. 完成！Team ID 会在 Accounts 页面显示      ║"
-          echo "║                                              ║"
-          echo "╚══════════════════════════════════════════════╝"
+          VNC_PASS="iosdev123"
+
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  📲 正在建立隧道，稍后显示连接地址..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo ""
 
-          # 启动 bore 隧道 (TCP)
-          echo "  正在启动隧道..."
-          bore local 5900 --to bore.pub 2>&1 | while IFS= read -r line; do
-            echo "$line"
-            if echo "$line" | grep -q "listening at"; then
-              ADDR=$(echo "$line" | grep -oE 'bore\.pub:[0-9]+')
-              if [ -n "$ADDR" ]; then
-                echo ""
-                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                echo "  📲 VNC 连接地址: $ADDR"
-                echo "  🔑 密码: iosdev123"
-                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                echo ""
-              fi
+          # 方式 1: bore (TCP)
+          bore local 5900 --to bore.pub 2>/tmp/bore.log &
+          BORE_PID=$!
+
+          # 方式 2: serveo.net (TCP, 更可靠)
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=60 \
+            -o ExitOnForwardFailure=yes \
+            -R 0:localhost:5900 serveo.net 2>/tmp/serveo.log &
+          SERVEO_PID=$!
+
+          # 等连接建立
+          sleep 8
+
+          # 显示 bore 结果
+          if kill -0 $BORE_PID 2>/dev/null; then
+            BORE_ADDR=$(grep -oE 'bore\.pub:[0-9]+' /tmp/bore.log 2>/dev/null | tail -1)
+            if [ -n "$BORE_ADDR" ]; then
+              echo "  ✅ 隧道 1 (bore): $BORE_ADDR"
+              echo "BORE_ADDR=$BORE_ADDR" >> "$GITHUB_ENV"
             fi
-          done
+          fi
+
+          # 显示 serveo 结果
+          if kill -0 $SERVEO_PID 2>/dev/null; then
+            SERVEO_ADDR=$(grep -oE 'serveo\.net:[0-9]+' /tmp/serveo.log 2>/dev/null | tail -1)
+            if [ -n "$SERVEO_ADDR" ]; then
+              echo "  ✅ 隧道 2 (serveo): $SERVEO_ADDR"
+              echo "SERVEO_ADDR=$SERVEO_ADDR" >> "$GITHUB_ENV"
+            fi
+          fi
+
+          # 如果 bore 没输出，手动解析
+          if [ -z "${BORE_ADDR:-}" ] && [ -z "${SERVEO_ADDR:-}" ]; then
+            echo "  ⏳ 隧道可能还在建立中，请查看下方日志..."
+            echo "  bore 日志:"
+            cat /tmp/bore.log 2>/dev/null | tail -5
+            echo "  serveo 日志:"
+            cat /tmp/serveo.log 2>/dev/null | tail -5
+          fi
+
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  🔑 VNC 密码: $VNC_PASS"
+          echo ""
+          echo "  📲 iPhone 操作:"
+          echo "  1. App Store 下载 'VNC Viewer'"
+          echo "  2. 地址: 填上面 bore 或 serveo 地址"
+          echo "  3. 密码: $VNC_PASS"
+          echo ""
+          echo "  🖥️  连上后:"
+          echo "  - Xcode 已在 Dock 栏"
+          echo "  - Xcode → Settings → Accounts → 登录 Apple ID"
+          echo ""
+          echo "  ⚠️  会话最长 60 分钟，之后自动断开"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+
+          # 持续输出日志直到超时
+          tail -f /tmp/bore.log /tmp/serveo.log 2>/dev/null &
+          wait $BORE_PID $SERVEO_PID 2>/dev/null || true
