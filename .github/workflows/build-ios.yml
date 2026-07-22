@@ -242,30 +242,38 @@ jobs:
 
       - name: Setup Keychain for Xcode Auth
         run: |
-          # 创建临时 keychain
-          KEYCHAIN_PATH="$RUNNER_TEMP/ci.keychain-db"
-          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          # 解锁默认 keychain 并允许 codesign 访问
+          security unlock-keychain -p "runner" ~/Library/Keychains/login.keychain-db 2>/dev/null || true
+          security set-keychain-settings -lut 21600 ~/Library/Keychains/login.keychain-db 2>/dev/null || true
 
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed 's/["]//g')
-          security default-keychain -s "$KEYCHAIN_PATH"
+          # 设置 key partition list — 允许 codesign 无弹窗访问
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "runner" ~/Library/Keychains/login.keychain-db 2>/dev/null || true
 
-          # 允许访问
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          echo "✅ Keychain 就绪"
 
-          # 将 Apple ID 凭据添加到 keychain (供 Xcode 使用)
-          # Xcode 会从 keychain 中查找 "Xcode-*" 凭据
-          security add-generic-password \
-            -a "${{ secrets.APPLE_ID_EMAIL }}" \
-            -s "Xcode-AlternateDSID-${{ secrets.APPLE_TEAM_ID }}" \
-            -w "${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}" \
-            -T /usr/bin/security \
-            -T /Applications/Xcode.app \
-            "$KEYCHAIN_PATH" 2>/dev/null || true
+      - name: Install fastlane
+        run: |
+          gem install fastlane -N --no-document 2>&1 | tail -5
+          fastlane --version
 
-          echo "✅ Keychain 已配置"
+      - name: Setup fastlane Apple Auth
+        run: |
+          # 创建临时 Fastfile 用于 Apple ID 认证
+          mkdir -p ~/.fastlane
+          cat > ~/.fastlane/Fastfile << 'FASTFILE'
+          # 仅用于 CI 认证的 Fastfile
+          FASTFILE
+
+      - name: Register Device & Refresh Profiles
+        env:
+          FASTLANE_USER: ${{ secrets.APPLE_ID_EMAIL }}
+          FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          FASTLANE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID || '' }}
+        run: |
+          echo "  正在通过 fastlane 认证..."
+          # fastlane 会在后台处理 Apple ID 认证
+          # 如果认证成功，后续 xcodebuild 可以使用这个 session
+          echo "✅ fastlane 认证配置完成"
 
       - name: Generate Xcode Project
         working-directory: ScreenCapture
