@@ -35,7 +35,7 @@ services:
     command: sh -c "
       wget -qO - https://github.com/ekzhang/bore/releases/download/v0.5.2/bore-v0.5.2-x86_64-unknown-linux-musl.tar.gz | tar xz -C /tmp &&
       chmod +x /tmp/bore &&
-      /tmp/bore server --min-port 20000
+      /tmp/bore server --min-port 20000 --max-port 20100
       "
     ports:
       - "7835:7835"

@@ -70,13 +70,15 @@ jobs:
 
           bore local 5900 --to "$BORE_SERVER" 2>&1 | while IFS= read -r line; do
             echo "$line"
+            # bore 输出格式: "listening at 127.0.0.1:PORT"
+            # 127.0.0.1 是服务器本地地址，实际应替换为域名
             if echo "$line" | grep -q "listening at"; then
-              ADDR=$(echo "$line" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+')
-              if [ -n "$ADDR" ]; then
+              PORT=$(echo "$line" | grep -oE ':[0-9]+$' | tr -d ':')
+              if [ -n "$PORT" ]; then
                 echo ""
                 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
                 echo "  ✅ 隧道已建立!"
-                echo "  📲 VNC 地址: $ADDR"
+                echo "  📲 VNC 地址: www.reelmagic.cloud:$PORT"
                 echo "  🔑 密码:     $VNC_PASS"
                 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
                 echo ""
