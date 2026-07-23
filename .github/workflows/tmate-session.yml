@@ -1,0 +1,85 @@
+name: 命令行修复 VNC
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fix:
+    name: 🖥️ 修复 macOS 桌面
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 尝试修复桌面黑屏
+        run: |
+          echo "=== 检查显示状态 ==="
+          system_profiler SPDisplaysDataType 2>&1 | head -20
+
+          echo ""
+          echo "=== 检查 WindowServer ==="
+          ps aux | grep -i windowserver | grep -v grep
+
+          echo ""
+          echo "=== 尝试强制开启显示 ==="
+          # 方法1: 设置 NVRAM
+          sudo nvram boot-args="niog=1" 2>/dev/null || true
+
+          # 方法2: 重启 WindowServer
+          sudo killall -HUP WindowServer 2>/dev/null || true
+          sleep 5
+
+          # 方法3: 打开多个应用
+          open /System/Applications/TextEdit.app 2>/dev/null || true
+          open /System/Applications/Calculator.app 2>/dev/null || true
+          XCODE=$(ls -d /Applications/Xcode*.app 2>/dev/null | head -1)
+          [ -n "$XCODE" ] && open "$XCODE"
+
+          sleep 5
+
+          # 截个图看看效果
+          screencapture /tmp/screen.png
+          echo ""
+          echo "=== 截图文件大小 ==="
+          ls -l /tmp/screen.png
+
+          # 把截图转base64打印
+          echo ""
+          echo "=== 截图(base64) ==="
+          base64 -i /tmp/screen.png | head -50
+
+      - name: 安装 tmate
+        run: brew install tmate 2>/dev/null || curl -fsSL https://github.com/tmate-io/tmate/releases/download/2.4.0/tmate-2.4.0-static-linux-amd64.tar.xz | true
+
+      - name: 启动 tmate SSH 会话
+        timeout-minutes: 25
+        run: |
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  正在启动 tmate..."
+          echo ""
+          echo "  tmate 会输出一个 SSH 连接地址"
+          echo "  用那个地址从我这边 SSH 进去修"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+
+          # 生成 SSH key
+          ssh-keygen -t rsa -f ~/.ssh/tmate_key -N "" -q
+          export TMATE_SOCKET_DIR=/tmp/tmate
+
+          # 启动 tmate
+          tmate -S /tmp/tmate.sock new-session -d 2>&1
+          tmate -S /tmp/tmate.sock wait tmate-ready 2>&1
+
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          SSH_CMD=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
+          echo "  SSH 连接: $SSH_CMD"
+          echo ""
+          WEB_CMD=$(tmate -S /tmp/tmate.sock display -p '#{tmate_web}')
+          echo "  Web 连接: $WEB_CMD"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+
+          # 保持运行
+          sleep 1500

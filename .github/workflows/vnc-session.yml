@@ -13,18 +13,21 @@ jobs:
 
       - name: 准备桌面环境 (防黑屏)
         run: |
-          # 禁用屏保和锁屏
-          sudo defaults write /Library/Preferences/com.apple.screensaver askForPassword -bool false
-          sudo defaults write /Library/Preferences/com.apple.screensaver askForPasswordDelay -int 0
+          # 切到浅色模式 (解决黑屏)
+          osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false' 2>/dev/null || true
+          defaults write NSGlobalDomain AppleInterfaceStyle -string "Light" 2>/dev/null || true
 
-          # 禁用显示器休眠
-          sudo pmset -a displaysleep 0 sleep 0
+          # 杀掉 Dock 让它重绘
+          killall Dock 2>/dev/null || true
+          killall Finder 2>/dev/null || true
+
+          # 禁用屏保和锁屏
+          sudo defaults write /Library/Preferences/com.apple.screensaver askForPassword -bool false 2>/dev/null || true
+          sudo pmset -a displaysleep 0 sleep 0 2>/dev/null || true
           caffeinate -d -i -m -s -u &
 
-          # 确保 WindowServer 活跃
-          sudo launchctl load /System/Library/LaunchDaemons/com.apple.WindowServer.plist 2>/dev/null || true
-
-          echo "✅ 桌面环境已准备"
+          sleep 5
+          echo "✅ 浅色模式已启用"
 
       - name: 开启 VNC 屏幕共享
         run: |
@@ -43,14 +46,10 @@ jobs:
           echo "VNC_PASS=$VNC_PASS" >> "$GITHUB_ENV"
           echo "✅ VNC 已开启"
 
-      - name: 打开 Xcode 和 Finder
+      - name: 打开 Xcode
         run: |
-          # 用当前用户身份启动 GUI
-          MYUID=$(id -u)
-          sudo launchctl asuser $MYUID open /System/Library/CoreServices/Finder.app 2>/dev/null || true
+          open /System/Library/CoreServices/Finder.app 2>/dev/null || true
           sleep 3
-
-          # 打开 Xcode
           XCODE=$(ls -d /Applications/Xcode*.app 2>/dev/null | head -1)
           [ -n "$XCODE" ] && open "$XCODE" && echo "✅ 已打开 $XCODE"
           sleep 5
