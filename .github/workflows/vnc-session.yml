@@ -45,14 +45,34 @@ jobs:
 
       - name: 打开 Xcode 和 Finder
         run: |
-          # 打开 Finder (强制桌面渲染)
-          open /System/Library/CoreServices/Finder.app
+          # 用当前用户身份启动 GUI
+          UID=$(id -u)
+          sudo launchctl asuser $UID open /System/Library/CoreServices/Finder.app 2>/dev/null || true
           sleep 3
 
           # 打开 Xcode
           XCODE=$(ls -d /Applications/Xcode*.app 2>/dev/null | head -1)
+          [ -n "$XCODE" ] && sudo launchctl asuser $UID open "$XCODE" 2>/dev/null || true
           [ -n "$XCODE" ] && open "$XCODE" && echo "✅ 已打开 $XCODE"
           sleep 5
+
+          # 强制重启 VNC（让它在桌面渲染后重新捕获画面）
+          VNC_PASS="iosdev123"
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -restart -agent 2>&1
+          sleep 3
+
+          # 截图用于调试
+          screencapture /tmp/debug-desktop.png
+          echo "✅ 桌面截图已保存"
+
+      - name: 上传桌面截图 (调试用)
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-desktop
+          path: /tmp/debug-desktop.png
+          retention-days: 1
+        continue-on-error: true
 
       - name: 安装 bore 客户端
         run: |
