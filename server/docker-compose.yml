@@ -29,6 +29,19 @@ services:
       - ./server.py:/app/server.py:ro
     restart: unless-stopped
 
+  # VNC 隧道中转 — CI macOS runner 通过此服务暴露远程桌面
+  bore-server:
+    image: alpine:3.19
+    command: sh -c "
+      wget -qO - https://github.com/ekzhang/bore/releases/download/v0.5.2/bore-v0.5.2-x86_64-unknown-linux-musl.tar.gz | tar xz -C /tmp &&
+      chmod +x /tmp/bore &&
+      /tmp/bore server --min-port 20000
+      "
+    ports:
+      - "7835:7835"
+      - "20000-20100:20000-20100"
+    restart: unless-stopped
+
 volumes:
   hls_data:
   caddy_data:
