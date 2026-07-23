@@ -66,14 +66,6 @@ jobs:
           screencapture /tmp/debug-desktop.png
           echo "✅ 桌面截图已保存"
 
-      - name: 上传桌面截图 (调试用)
-        uses: actions/upload-artifact@v4
-        with:
-          name: debug-desktop
-          path: /tmp/debug-desktop.png
-          retention-days: 1
-        continue-on-error: true
-
       - name: 安装 bore 客户端
         run: |
           curl -fsSL https://github.com/ekzhang/bore/releases/download/v0.5.2/bore-v0.5.2-x86_64-apple-darwin.tar.gz -o /tmp/bore.tar.gz
