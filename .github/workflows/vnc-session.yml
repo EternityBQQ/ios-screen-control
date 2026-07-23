@@ -35,53 +35,49 @@ jobs:
           [ -n "$XCODE" ] && open "$XCODE" && echo "✅ 已打开 $XCODE"
           sleep 5
 
-      - name: 安装 ngrok
+      - name: 安装 bore 客户端
         run: |
-          curl -fsSL https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-darwin-amd64.zip -o /tmp/ngrok.zip
-          unzip -o /tmp/ngrok.zip -d /usr/local/bin/
-          chmod +x /usr/local/bin/ngrok
-          ngrok config add-authtoken "${{ secrets.NGROK_AUTH_TOKEN }}"
-          echo "✅ ngrok 已就绪"
+          curl -fsSL https://github.com/ekzhang/bore/releases/download/v0.5.2/bore-v0.5.2-x86_64-apple-darwin.tar.gz -o /tmp/bore.tar.gz
+          tar xzf /tmp/bore.tar.gz -C /usr/local/bin/
+          chmod +x /usr/local/bin/bore
+          echo "✅ bore 已安装"
 
-      - name: 启动 ngrok 隧道 + 输出连接信息
+      - name: 启动隧道 → 用自己的服务器中转
         timeout-minutes: 55
         run: |
           VNC_PASS="iosdev123"
+          BORE_SERVER="124.222.192.43:7835"
 
           echo ""
           echo "╔══════════════════════════════════════════════╗"
           echo "║     🖥️  macOS 远程桌面                         ║"
           echo "╠══════════════════════════════════════════════╣"
-          echo "║                                              ║"
           echo "║  📲 iPhone 操作:                              ║"
           echo "║  1. App Store → 下载 'VNC Viewer'            ║"
-          echo "║  2. 地址: 填下方显示的 ngrok 地址              ║"
+          echo "║  2. 地址: 下方显示                            ║"
           echo "║  3. 密码: iosdev123                          ║"
           echo "║                                              ║"
           echo "║  🖥️  连上后:                                  ║"
           echo "║  1. Dock 点 Xcode 图标                       ║"
           echo "║  2. Settings → Accounts → + 登录 Apple ID    ║"
-          echo "║  3. 然后新建任意项目 → Team 选 Personal Team  ║"
-          echo "║  4. 证书自动创建 → 到此完成                    ║"
-          echo "║                                              ║"
+          echo "║  3. File → New → Project → iOS App           ║"
+          echo "║  4. Team 选 Personal Team → 证书自动创建     ║"
+          echo "║  5. 然后跑 curl 脚本导出证书                  ║"
           echo "╚══════════════════════════════════════════════╝"
           echo ""
+          echo "  中转服务器: $BORE_SERVER"
+          echo ""
 
-          # 启动 ngrok TCP 隧道
-          ngrok tcp 5900 --log=stdout 2>&1 | while IFS= read -r line; do
+          bore local 5900 --to "$BORE_SERVER" 2>&1 | while IFS= read -r line; do
             echo "$line"
-            # 捕获 ngrok 分配的地址
-            if echo "$line" | grep -q "started tunnel"; then
-              echo ""
-            fi
-            if echo "$line" | grep -q "url="; then
-              ADDR=$(echo "$line" | grep -oE 'tcp://[^[:space:]]+' | sed 's|tcp://||')
+            if echo "$line" | grep -q "listening at"; then
+              ADDR=$(echo "$line" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+')
               if [ -n "$ADDR" ]; then
                 echo ""
                 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                echo "  ✅ 隧道已建立!                              "
-                echo "  📲 VNC 地址: $ADDR                      "
-                echo "  🔑 密码:     $VNC_PASS                      "
+                echo "  ✅ 隧道已建立!"
+                echo "  📲 VNC 地址: $ADDR"
+                echo "  🔑 密码:     $VNC_PASS"
                 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
                 echo ""
               fi
