@@ -1,8 +1,5 @@
 name: VNC 远程桌面
 
-# 在 GitHub Actions macOS runner 上开启 VNC 远程桌面
-# 用 iPhone 的 VNC Viewer 连上去操作 Xcode 登录 Apple ID
-
 on:
   workflow_dispatch:
 
@@ -14,132 +11,79 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 开启 macOS 屏幕共享 (VNC)
+      - name: 开启 VNC 屏幕共享
         run: |
           VNC_PASS="iosdev123"
 
-          echo "  正在开启屏幕共享..."
-
-          # 先彻底停掉
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
             -deactivate -stop 2>/dev/null || true
-
-          # 开启系统级屏幕共享
-          sudo defaults write /var/db/launchd.db/com.apple.launchd/overrides.plist \
-            com.apple.screensharing -dict Disabled -bool false
-          sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.screensharing.plist 2>/dev/null || true
-
-          # 开启 VNC 远程管理 (legacy VNC 协议，iPhone VNC Viewer 需要这个)
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
             -activate -configure -access -on \
             -clientopts -setvnclegacy -vnclegacy yes \
             -clientopts -setvncpw -vncpw "$VNC_PASS" \
             -restart -agent 2>&1
 
-          echo "✅ VNC 已开启 (密码: $VNC_PASS)"
-
-          # 确保端口在监听
           sleep 3
-          lsof -i :5900 | head -5
+          lsof -i :5900 | head -3
           echo "VNC_PASS=$VNC_PASS" >> "$GITHUB_ENV"
+          echo "✅ VNC 已开启"
 
       - name: 唤醒显示器 + 打开 Xcode
         run: |
-          # 防止显示器休眠
           caffeinate -d -i -m -s &
-          echo "✅ 显示器保持唤醒"
-
-          # 重启屏幕共享
-          sudo launchctl start com.apple.screensharing 2>/dev/null || true
-
-          # 找到并打开 Xcode
           XCODE=$(ls -d /Applications/Xcode*.app 2>/dev/null | head -1)
-          if [ -n "$XCODE" ]; then
-            open "$XCODE"
-            echo "✅ 已打开 $XCODE"
-          else
-            echo "⚠️ 未找到 Xcode"
-          fi
+          [ -n "$XCODE" ] && open "$XCODE" && echo "✅ 已打开 $XCODE"
           sleep 5
 
-          # 截个图确认桌面正常
-          screencapture /tmp/desktop.png
-          echo "✅ 桌面截图已保存"
-
-      - name: 安装 bore 隧道工具
+      - name: 安装 ngrok
         run: |
-          curl -fsSL https://github.com/ekzhang/bore/releases/download/v0.5.2/bore-v0.5.2-x86_64-apple-darwin.tar.gz -o /tmp/bore.tar.gz
-          tar xzf /tmp/bore.tar.gz -C /usr/local/bin/
-          chmod +x /usr/local/bin/bore
-          echo "✅ bore 已安装"
+          curl -fsSL https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-darwin-amd64.zip -o /tmp/ngrok.zip
+          unzip -o /tmp/ngrok.zip -d /usr/local/bin/
+          chmod +x /usr/local/bin/ngrok
+          ngrok config add-authtoken "${{ secrets.NGROK_AUTH_TOKEN }}"
+          echo "✅ ngrok 已就绪"
 
-      - name: 启动隧道 (多路同时尝试)
+      - name: 启动 ngrok 隧道 + 输出连接信息
         timeout-minutes: 55
         run: |
           VNC_PASS="iosdev123"
 
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "  📲 正在建立隧道，稍后显示连接地址..."
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "╔══════════════════════════════════════════════╗"
+          echo "║     🖥️  macOS 远程桌面                         ║"
+          echo "╠══════════════════════════════════════════════╣"
+          echo "║                                              ║"
+          echo "║  📲 iPhone 操作:                              ║"
+          echo "║  1. App Store → 下载 'VNC Viewer'            ║"
+          echo "║  2. 地址: 填下方显示的 ngrok 地址              ║"
+          echo "║  3. 密码: iosdev123                          ║"
+          echo "║                                              ║"
+          echo "║  🖥️  连上后:                                  ║"
+          echo "║  1. Dock 点 Xcode 图标                       ║"
+          echo "║  2. Settings → Accounts → + 登录 Apple ID    ║"
+          echo "║  3. 然后新建任意项目 → Team 选 Personal Team  ║"
+          echo "║  4. 证书自动创建 → 到此完成                    ║"
+          echo "║                                              ║"
+          echo "╚══════════════════════════════════════════════╝"
           echo ""
 
-          # 方式 1: bore (TCP)
-          bore local 5900 --to bore.pub 2>/tmp/bore.log &
-          BORE_PID=$!
-
-          # 方式 2: serveo.net (TCP, 更可靠)
-          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=60 \
-            -o ExitOnForwardFailure=yes \
-            -R 0:localhost:5900 serveo.net 2>/tmp/serveo.log &
-          SERVEO_PID=$!
-
-          # 等连接建立
-          sleep 8
-
-          # 显示 bore 结果
-          if kill -0 $BORE_PID 2>/dev/null; then
-            BORE_ADDR=$(grep -oE 'bore\.pub:[0-9]+' /tmp/bore.log 2>/dev/null | tail -1)
-            if [ -n "$BORE_ADDR" ]; then
-              echo "  ✅ 隧道 1 (bore): $BORE_ADDR"
-              echo "BORE_ADDR=$BORE_ADDR" >> "$GITHUB_ENV"
+          # 启动 ngrok TCP 隧道
+          ngrok tcp 5900 --log=stdout 2>&1 | while IFS= read -r line; do
+            echo "$line"
+            # 捕获 ngrok 分配的地址
+            if echo "$line" | grep -q "started tunnel"; then
+              echo ""
             fi
-          fi
-
-          # 显示 serveo 结果
-          if kill -0 $SERVEO_PID 2>/dev/null; then
-            SERVEO_ADDR=$(grep -oE 'serveo\.net:[0-9]+' /tmp/serveo.log 2>/dev/null | tail -1)
-            if [ -n "$SERVEO_ADDR" ]; then
-              echo "  ✅ 隧道 2 (serveo): $SERVEO_ADDR"
-              echo "SERVEO_ADDR=$SERVEO_ADDR" >> "$GITHUB_ENV"
+            if echo "$line" | grep -q "url="; then
+              ADDR=$(echo "$line" | grep -oE 'tcp://[^[:space:]]+' | sed 's|tcp://||')
+              if [ -n "$ADDR" ]; then
+                echo ""
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                echo "  ✅ 隧道已建立!                              "
+                echo "  📲 VNC 地址: $ADDR                      "
+                echo "  🔑 密码:     $VNC_PASS                      "
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                echo ""
+              fi
             fi
-          fi
-
-          # 如果 bore 没输出，手动解析
-          if [ -z "${BORE_ADDR:-}" ] && [ -z "${SERVEO_ADDR:-}" ]; then
-            echo "  ⏳ 隧道可能还在建立中，请查看下方日志..."
-            echo "  bore 日志:"
-            cat /tmp/bore.log 2>/dev/null | tail -5
-            echo "  serveo 日志:"
-            cat /tmp/serveo.log 2>/dev/null | tail -5
-          fi
-
-          echo ""
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "  🔑 VNC 密码: $VNC_PASS"
-          echo ""
-          echo "  📲 iPhone 操作:"
-          echo "  1. App Store 下载 'VNC Viewer'"
-          echo "  2. 地址: 填上面 bore 或 serveo 地址"
-          echo "  3. 密码: $VNC_PASS"
-          echo ""
-          echo "  🖥️  连上后:"
-          echo "  - Xcode 已在 Dock 栏"
-          echo "  - Xcode → Settings → Accounts → 登录 Apple ID"
-          echo ""
-          echo "  ⚠️  会话最长 60 分钟，之后自动断开"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo ""
-
-          # 持续输出日志直到超时
-          tail -f /tmp/bore.log /tmp/serveo.log 2>/dev/null &
-          wait $BORE_PID $SERVEO_PID 2>/dev/null || true
+          done
