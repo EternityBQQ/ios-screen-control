@@ -1,0 +1,77 @@
+name: 获取 Team ID
+
+on:
+  workflow_dispatch:
+
+jobs:
+  discover:
+    name: 🔍 从 Apple ID 发现 Team ID
+    runs-on: macos-15
+    timeout-minutes: 15
+    env:
+      FASTLANE_USER: ${{ secrets.APPLE_ID_EMAIL }}
+      FASTLANE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      SPACESHIP_SKIP_2FA_UPGRADE: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 fastlane
+        run: |
+          gem install fastlane -N --no-document 2>&1 | tail -3
+
+      - name: 发现 Team ID
+        run: |
+          ruby << 'RUBY'
+          require 'spaceship'
+
+          user = ENV['FASTLANE_USER']
+          pass = ENV['FASTLANE_PASSWORD']
+
+          puts "User: #{user}"
+          puts "Pass: #{pass ? 'SET' : 'NOT SET'}"
+
+          if !user || user.empty? || !pass || pass.empty?
+            puts "❌ 请先设置 GitHub Secrets: APPLE_ID_EMAIL 和 APPLE_APP_SPECIFIC_PASSWORD"
+            exit 1
+          end
+
+          # 尝试 Apple Developer Portal 登录
+          begin
+            Spaceship::Portal.login(username: user, password: pass)
+            teams = Spaceship::Portal.client.teams
+            puts ""
+            puts "✅ Portal 登录成功!"
+            puts "   找到 #{teams.count} 个团队:"
+            teams.each do |t|
+              puts "   - #{t['name']} (Team ID: #{t['teamId']})"
+            end
+          rescue => e
+            puts ""
+            puts "⚠️  Portal 登录失败: #{e.message[0..200]}"
+          end
+
+          # 尝试 App Store Connect API
+          begin
+            Spaceship::ConnectAPI.login(username: user, password: pass)
+            puts ""
+            puts "✅ ConnectAPI 登录成功!"
+          rescue => e
+            puts ""
+            puts "⚠️  ConnectAPI 失败: #{e.message[0..200]}"
+          end
+
+          # 尝试 iTunes Connect
+          begin
+            Spaceship::Tunes.login(user, pass)
+            teams = Spaceship::Tunes.client.teams
+            puts ""
+            puts "✅ iTunes Connect 登录成功!"
+            puts "   找到 #{teams.count} 个团队:"
+            teams.each do |t|
+              puts "   - #{t['name']} (Provider ID: #{t['providerId']})"
+            end
+          rescue => e
+            puts ""
+            puts "⚠️  iTunes Connect 失败: #{e.message[0..200]}"
+          end
+          RUBY
