@@ -46,7 +46,7 @@ jobs:
         timeout-minutes: 55
         run: |
           VNC_PASS="iosdev123"
-          BORE_SERVER="www.reelmagic.cloud:7835"
+          BORE_SERVER="www.reelmagic.cloud"
 
           echo ""
           echo "╔══════════════════════════════════════════════╗"
